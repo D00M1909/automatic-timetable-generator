@@ -2,28 +2,38 @@
 require_once 'config.php';
 
 $view_mode = $_GET['mode'] ?? 'class';
-$selected_id = $_GET['id'] ?? 0;
+$selected_id = intval($_GET['id'] ?? 0);
 
-$classes = $conn->query("SELECT * FROM classes ORDER BY class_name");
-$faculty = $conn->query("SELECT * FROM faculty ORDER BY faculty_name");
-$days = $conn->query("SELECT * FROM working_days WHERE is_working=1 ORDER BY day_order");
-$slots = $conn->query("SELECT * FROM time_slots WHERE is_active=1 ORDER BY slot_number");
+$classes = db_get_rows($conn, "SELECT * FROM classes ORDER BY class_name");
+$faculty = db_get_rows($conn, "SELECT * FROM faculty ORDER BY faculty_name");
+$rooms = db_get_rows($conn, "SELECT r.*, b.building_name FROM rooms r JOIN buildings b ON r.building_id = b.building_id ORDER BY r.room_name");
+$days = db_get_rows($conn, "SELECT * FROM working_days WHERE is_working=1 ORDER BY day_order");
+$slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORDER BY slot_number");
 
-$day_list = [];
-while ($row = $days->fetch_assoc()) { $day_list[] = $row; }
-
-$slot_list = [];
-while ($row = $slots->fetch_assoc()) { $slot_list[] = $row; }
+$day_list = $days;
+$slot_list = $slots;
 
 $timetable_data = [];
+$selected_name = '';
+
 if ($selected_id > 0) {
     if ($view_mode === 'class') {
-        $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id WHERE t.class_id = $selected_id ORDER BY d.day_order, ts.slot_number";
+        $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name, r.room_name, b.building_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id LEFT JOIN rooms r ON t.room_id = r.room_id LEFT JOIN buildings b ON r.building_id = b.building_id WHERE t.class_id = ? ORDER BY d.day_order, ts.slot_number";
+        $rows = db_get_rows($conn, $query, "i", [$selected_id]);
+        $sel = db_get_row($conn, "SELECT class_name FROM classes WHERE class_id = ?", "i", [$selected_id]);
+        $selected_name = $sel ? $sel['class_name'] : '';
+    } elseif ($view_mode === 'faculty') {
+        $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name, r.room_name, b.building_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id LEFT JOIN rooms r ON t.room_id = r.room_id LEFT JOIN buildings b ON r.building_id = b.building_id WHERE t.faculty_id = ? ORDER BY d.day_order, ts.slot_number";
+        $rows = db_get_rows($conn, $query, "i", [$selected_id]);
+        $sel = db_get_row($conn, "SELECT faculty_name FROM faculty WHERE faculty_id = ?", "i", [$selected_id]);
+        $selected_name = $sel ? $sel['faculty_name'] : '';
     } else {
-        $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id WHERE t.faculty_id = $selected_id ORDER BY d.day_order, ts.slot_number";
+        $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name, r.room_name, b.building_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id LEFT JOIN rooms r ON t.room_id = r.room_id LEFT JOIN buildings b ON r.building_id = b.building_id WHERE t.room_id = ? ORDER BY d.day_order, ts.slot_number";
+        $rows = db_get_rows($conn, $query, "i", [$selected_id]);
+        $sel = db_get_row($conn, "SELECT CONCAT(r.room_name, ' (', b.building_name, ')') as name FROM rooms r JOIN buildings b ON r.building_id = b.building_id WHERE r.room_id = ?", "i", [$selected_id]);
+        $selected_name = $sel ? $sel['name'] : '';
     }
-    $result = $conn->query($query);
-    while ($row = $result->fetch_assoc()) {
+    foreach ($rows as $row) {
         $timetable_data[$row['day_id']][$row['slot_id']] = $row;
     }
 }
@@ -31,212 +41,101 @@ if ($selected_id > 0) {
 function format_time($time) {
     return date('h:i A', strtotime($time));
 }
+
+function pdf_export_link($mode, $id) {
+    return "view.php?mode=" . urlencode($mode) . "&id=" . intval($id) . "&export=pdf";
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Timetable - Timetable Management</title>
+    <title>View Timetable - AI Smart Timetable</title>
+    <?php common_styles(); ?>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; }
-
-        .sidebar {
-            position: fixed; left: 0; top: 0; width: 240px; height: 100vh;
-            background: #6B1B5E; color: white; overflow-y: auto; z-index: 100;
-        }
-        .sidebar-header {
-            padding: 15px; background: #5a1850; border-bottom: 1px solid rgba(255,255,255,0.1);
-            display: flex; align-items: center; gap: 10px;
-        }
-        .sidebar-header h2 { font-size: 14px; font-weight: 600; }
-        .sidebar-menu { padding: 10px 0; }
-        .menu-item {
-            padding: 12px 20px; display: flex; align-items: center; gap: 12px;
-            cursor: pointer; transition: background 0.2s; text-decoration: none; color: rgba(255,255,255,0.85);
-            font-size: 14px; border-left: 3px solid transparent;
-        }
-        .menu-item:hover, .menu-item.active {
-            background: rgba(255,255,255,0.1); color: white; border-left-color: #F5A623;
-        }
-        .menu-item svg { width: 18px; height: 18px; fill: currentColor; opacity: 0.8; }
-        .menu-item:hover svg, .menu-item.active svg { opacity: 1; }
-        .menu-section {
-            padding: 8px 20px; font-size: 11px; text-transform: uppercase;
-            color: rgba(255,255,255,0.5); letter-spacing: 1px; margin-top: 10px;
-        }
-
-        .top-header {
-            position: fixed; left: 240px; top: 0; right: 0; height: 50px;
-            background: #F5A623; color: white; display: flex;
-            align-items: center; justify-content: space-between; padding: 0 25px; z-index: 99;
-        }
-        .top-header-left { display: flex; align-items: center; gap: 15px; font-size: 14px; }
-        .top-header-right { display: flex; align-items: center; gap: 20px; font-size: 13px; }
-        .top-header-right a { color: white; text-decoration: none; }
-
-        .content-wrapper {
-            margin-left: 240px; margin-top: 50px; padding: 25px; min-height: calc(100vh - 50px);
-        }
-        .breadcrumb {
-            font-size: 13px; color: #666; margin-bottom: 20px;
-        }
-        .breadcrumb a { color: #3498db; text-decoration: none; }
-        .breadcrumb a:hover { text-decoration: underline; }
-
-        .content-box {
-            background: white; border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;
-        }
-        .content-box-header {
-            padding: 15px 20px; border-bottom: 1px solid #eee;
-            font-size: 16px; font-weight: 600; color: #333;
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .content-box-body { padding: 20px; }
-
-        .btn {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 6px 16px; background: #3498db; color: white;
-            text-decoration: none; border-radius: 3px; border: none; cursor: pointer; font-size: 13px;
-        }
-        .btn:hover { background: #2980b9; }
-        .btn-active { background: #27ae60; }
-        .btn-print { background: #6c757d; }
-        .btn-print:hover { background: #5a6268; }
-        .btn svg { width: 14px; height: 14px; fill: currentColor; }
-
-        .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
-        .filter-bar select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 3px; min-width: 220px; font-size: 13px; }
-        .view-toggle { display: flex; gap: 5px; margin-bottom: 15px; }
-
         .timetable-container { overflow-x: auto; }
-        .timetable-grid {
-            width: 100%; border-collapse: collapse; font-size: 13px;
-            border: 1px solid #ddd;
-        }
-        .timetable-grid th {
-            background: #00BFA5; color: white; padding: 10px 8px;
-            text-align: center; font-weight: 600; border: 1px solid #00a896;
-        }
-        .timetable-grid td {
-            padding: 8px; text-align: center; border: 1px solid #e0e0e0;
-            min-width: 100px; height: 60px; vertical-align: middle;
-        }
-        .timetable-grid .time-cell {
-            background: #f8f9fa; font-weight: 600; color: #555;
-            text-align: left; padding-left: 12px; min-width: 160px;
-        }
-        .timetable-grid .break-cell {
-            background: #fff8e1; color: #856404; font-style: italic;
-        }
-        .timetable-grid .lunch-cell {
-            background: #ffecb3; color: #856404; font-weight: 600;
-        }
-        .timetable-grid .class-slot {
-            background: #e8f5e9;
-        }
-        .timetable-grid .class-slot.lab {
-            background: #e3f2fd; border: 2px solid #2196f3;
-        }
-        .timetable-grid .empty-slot {
-            color: #ccc;
-        }
+        .timetable-grid { width: 100%; border-collapse: collapse; font-size: 13px; border: 1px solid #ddd; }
+        .timetable-grid th { background: #00BFA5; color: white; padding: 10px 8px; text-align: center; font-weight: 600; border: 1px solid #00a896; }
+        .timetable-grid td { padding: 8px; text-align: center; border: 1px solid #e0e0e0; min-width: 110px; height: 60px; vertical-align: middle; }
+        .timetable-grid .time-cell { background: #f8f9fa; font-weight: 600; color: #555; text-align: left; padding-left: 12px; min-width: 160px; }
+        .timetable-grid .break-cell { background: #fff8e1; color: #856404; font-style: italic; }
+        .timetable-grid .lunch-cell { background: #ffecb3; color: #856404; font-weight: 600; }
+        .timetable-grid .class-slot { background: #e8f5e9; }
+        .timetable-grid .class-slot.lab { background: #e3f2fd; border: 2px solid #2196f3; }
+        .timetable-grid .empty-slot { color: #ccc; }
         .subject-name { font-weight: 600; color: #333; font-size: 12px; }
         .faculty-name { color: #666; font-size: 11px; }
         .class-name { color: #3498db; font-size: 11px; }
+        .room-name { color: #9c27b0; font-size: 10px; font-weight: 600; }
+        .building-name { color: #888; font-size: 10px; }
         .lab-badge { font-size: 10px; color: #2196f3; font-weight: 600; }
-
-        .no-data { text-align: center; padding: 40px; color: #666; }
-        .legend { display: flex; gap: 20px; margin-top: 15px; font-size: 12px; }
+        .energy-badge { font-size: 9px; color: #27ae60; background: #d4edda; padding: 1px 4px; border-radius: 2px; display: inline-block; margin-top: 2px; }
+        .view-toggle { display: flex; gap: 5px; margin-bottom: 15px; }
+        .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+        .filter-bar select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 3px; min-width: 220px; font-size: 13px; }
+        .legend { display: flex; gap: 20px; margin-top: 15px; font-size: 12px; flex-wrap: wrap; }
         .legend-item { display: flex; align-items: center; gap: 6px; }
         .legend-box { width: 16px; height: 16px; border: 1px solid #ddd; }
-
+        .print-header { display: none; }
         @media print {
             .sidebar, .top-header, .filter-bar, .view-toggle, .btn-print { display: none; }
             .content-wrapper { margin-left: 0; margin-top: 0; }
             .content-box { box-shadow: none; border: 1px solid #ddd; }
+            .print-header { display: block; text-align: center; margin-bottom: 20px; }
+            .print-header h2 { font-size: 18px; color: #6B1B5E; }
+            .print-header p { font-size: 12px; color: #666; }
         }
     </style>
 </head>
 <body>
-    <svg style="display:none">
-        <defs>
-            <symbol id="icon-dashboard" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></symbol>
-            <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.59.91l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
-            <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></symbol>
-            <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></symbol>
-            <symbol id="icon-print" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></symbol>
-        </defs>
-    </svg>
-
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#6B1B5E;font-weight:bold;font-size:18px;">A</div>
-            <h2>Ajeenkya DY Patil<br><span style="font-size:11px;font-weight:400;opacity:0.8;">University ERP</span></h2>
-        </div>
-        <div class="sidebar-menu">
-            <a href="index.php" class="menu-item">
-                <svg><use href="#icon-dashboard"/></svg> Dashboard
-            </a>
-            <div class="menu-section">Timetable</div>
-            <a href="setup.php" class="menu-item">
-                <svg><use href="#icon-settings"/></svg> Manage Data
-            </a>
-            <a href="generate.php" class="menu-item">
-                <svg><use href="#icon-refresh"/></svg> Generate Timetable
-            </a>
-            <a href="view.php" class="menu-item active">
-                <svg><use href="#icon-eye"/></svg> View Timetable
-            </a>
-        </div>
-    </div>
-
-    <div class="top-header">
-        <div class="top-header-left">
-            <span style="font-size:18px;cursor:pointer;">&#9776;</span>
-            <span>Active Academic Year: 2025-26 Summer Term</span>
-        </div>
-        <div class="top-header-right">
-            <span>&#128276; 0</span>
-            <span>Welcome, User</span>
-            <a href="#">Logout</a>
-        </div>
-    </div>
+    <?php svg_defs(); ?>
+    <?php sidebar('view'); ?>
+    <?php top_header(); ?>
 
     <div class="content-wrapper">
-        <div class="breadcrumb">
-            <a href="index.php">Home</a> / <span>Manage Time Table</span> / <span>Student Time Table</span>
-        </div>
+        <?php breadcrumb(['Manage Time Table', 'Student Time Table']); ?>
 
         <div class="content-box">
             <div class="content-box-header">
                 <span>View Timetable</span>
-                <button class="btn btn-print" onclick="window.print()">
-                    <svg><use href="#icon-print"/></svg> Print
-                </button>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-print" onclick="window.print()">
+                        <svg><use href="#icon-print"/></svg> Print
+                    </button>
+                </div>
             </div>
             <div class="content-box-body">
+                <div class="print-header">
+                    <h2>Ajeenkya DY Patil University</h2>
+                    <p>AI-Generated Academic Timetable | <?php echo date('F Y'); ?></p>
+                    <?php if ($selected_name): ?><p><strong><?php echo htmlspecialchars($selected_name); ?></strong></p><?php endif; ?>
+                </div>
+
                 <div class="view-toggle">
-                    <a href="?mode=class" class="btn <?php echo $view_mode === 'class' ? 'btn-active' : ''; ?>">By Class</a>
-                    <a href="?mode=faculty" class="btn <?php echo $view_mode === 'faculty' ? 'btn-active' : ''; ?>">By Faculty</a>
+                    <a href="?mode=class" class="btn <?php echo $view_mode === 'class' ? 'btn-success' : ''; ?>">By Class</a>
+                    <a href="?mode=faculty" class="btn <?php echo $view_mode === 'faculty' ? 'btn-success' : ''; ?>">By Faculty</a>
+                    <a href="?mode=room" class="btn <?php echo $view_mode === 'room' ? 'btn-success' : ''; ?>">By Room</a>
                 </div>
 
                 <form method="GET" class="filter-bar">
-                    <input type="hidden" name="mode" value="<?php echo $view_mode; ?>">
-                    <label style="font-size:13px;font-weight:600;">Select <?php echo $view_mode === 'class' ? 'Class' : 'Faculty'; ?>:</label>
+                    <input type="hidden" name="mode" value="<?php echo htmlspecialchars($view_mode); ?>">
+                    <label style="font-size:13px;font-weight:600;">Select <?php echo $view_mode === 'class' ? 'Class' : ($view_mode === 'faculty' ? 'Faculty' : 'Room'); ?>:</label>
                     <select name="id" onchange="this.form.submit()">
-                        <option value="">-- Select <?php echo $view_mode === 'class' ? 'Class' : 'Faculty'; ?> --</option>
+                        <option value="">-- Select <?php echo $view_mode === 'class' ? 'Class' : ($view_mode === 'faculty' ? 'Faculty' : 'Room'); ?> --</option>
                         <?php 
-                        $list = $view_mode === 'class' ? $classes : $faculty;
-                        $list->data_seek(0);
-                        while ($row = $list->fetch_assoc()): 
-                            $id = $view_mode === 'class' ? $row['class_id'] : $row['faculty_id'];
-                            $name = $view_mode === 'class' ? $row['class_name'] . ' (' . $row['class_code'] . ')' : $row['faculty_name'] . ' (' . $row['faculty_code'] . ')';
+                        $list = $view_mode === 'class' ? $classes : ($view_mode === 'faculty' ? $faculty : $rooms);
+                        foreach ($list as $row): 
+                            if ($view_mode === 'class') {
+                                $id = $row['class_id']; $name = $row['class_name'] . ' (' . $row['class_code'] . ')';
+                            } elseif ($view_mode === 'faculty') {
+                                $id = $row['faculty_id']; $name = $row['faculty_name'] . ' (' . $row['faculty_code'] . ')';
+                            } else {
+                                $id = $row['room_id']; $name = $row['room_name'] . ' - ' . $row['building_name'] . ' (' . $row['room_type'] . ')';
+                            }
                         ?>
-                        <option value="<?php echo $id; ?>" <?php echo $selected_id == $id ? 'selected' : ''; ?>><?php echo $name; ?></option>
-                        <?php endwhile; ?>
+                        <option value="<?php echo $id; ?>" <?php echo $selected_id == $id ? 'selected' : ''; ?>><?php echo htmlspecialchars($name); ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </form>
 
@@ -258,7 +157,6 @@ function format_time($time) {
                                     <?php 
                                     $cell_data = $timetable_data[$day['day_id']][$slot['slot_id']] ?? null;
                                     $cell_class = '';
-
                                     if ($slot['slot_type'] === 'break') {
                                         $cell_class = 'break-cell';
                                     } elseif ($slot['slot_type'] === 'lunch') {
@@ -276,14 +174,21 @@ function format_time($time) {
                                         <?php elseif ($slot['slot_type'] === 'lunch'): ?>
                                             --
                                         <?php elseif ($cell_data): ?>
-                                            <div class="subject-name"><?php echo $cell_data['subject_name']; ?></div>
+                                            <div class="subject-name"><?php echo htmlspecialchars($cell_data['subject_name'] ?? ''); ?></div>
                                             <?php if ($view_mode === 'class'): ?>
-                                                <div class="faculty-name"><?php echo $cell_data['faculty_name']; ?></div>
+                                                <div class="faculty-name"><?php echo htmlspecialchars($cell_data['faculty_name'] ?? ''); ?></div>
+                                            <?php elseif ($view_mode === 'faculty'): ?>
+                                                <div class="class-name"><?php echo htmlspecialchars($cell_data['class_name'] ?? ''); ?></div>
                                             <?php else: ?>
-                                                <div class="class-name"><?php echo $cell_data['class_name']; ?></div>
+                                                <div class="class-name"><?php echo htmlspecialchars($cell_data['class_name'] ?? ''); ?></div>
+                                                <div class="faculty-name"><?php echo htmlspecialchars($cell_data['faculty_name'] ?? ''); ?></div>
                                             <?php endif; ?>
+                                            <div class="room-name"><?php echo htmlspecialchars(($cell_data['room_name'] ?? '') . ' / ' . ($cell_data['building_name'] ?? '')); ?></div>
                                             <?php if ($cell_data['is_lab']): ?>
                                                 <div class="lab-badge">LAB</div>
+                                            <?php endif; ?>
+                                            <?php if ($cell_data['energy_score'] > 0): ?>
+                                                <div class="energy-badge">Eco+<?php echo $cell_data['energy_score']; ?></div>
                                             <?php endif; ?>
                                         <?php else: ?>
                                             --
@@ -300,6 +205,8 @@ function format_time($time) {
                         <div class="legend-item"><div class="legend-box" style="background:#e3f2fd;border:2px solid #2196f3;"></div> Lab</div>
                         <div class="legend-item"><div class="legend-box" style="background:#fff8e1;"></div> Break</div>
                         <div class="legend-item"><div class="legend-box" style="background:#ffecb3;"></div> Lunch</div>
+                        <div class="legend-item"><div class="legend-box" style="background:#f3e5f5;"></div> Room Allocated</div>
+                        <div class="legend-item"><span class="energy-badge" style="margin:0;">Eco+</span> Energy Optimized</div>
                     </div>
 
                 <?php elseif ($selected_id > 0): ?>
@@ -310,7 +217,7 @@ function format_time($time) {
                     </div>
                 <?php else: ?>
                     <div class="no-data">
-                        <h3>Select a <?php echo $view_mode === 'class' ? 'Class' : 'Faculty'; ?> to view the timetable</h3>
+                        <h3>Select a <?php echo $view_mode === 'class' ? 'Class' : ($view_mode === 'faculty' ? 'Faculty' : 'Room'); ?> to view the timetable</h3>
                     </div>
                 <?php endif; ?>
             </div>
