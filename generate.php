@@ -167,6 +167,8 @@ $timetable_count = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetc
         .menu-item:hover, .menu-item.active {
             background: rgba(255,255,255,0.1); color: white; border-left-color: #F5A623;
         }
+        .menu-item svg { width: 18px; height: 18px; fill: currentColor; opacity: 0.8; }
+        .menu-item:hover svg, .menu-item.active svg { opacity: 1; }
         .menu-section {
             padding: 8px 20px; font-size: 11px; text-transform: uppercase;
             color: rgba(255,255,255,0.5); letter-spacing: 1px; margin-top: 10px;
@@ -201,13 +203,15 @@ $timetable_count = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetc
         .content-box-body { padding: 20px; }
 
         .btn {
-            display: inline-block; padding: 8px 20px; background: #3498db; color: white;
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 20px; background: #3498db; color: white;
             text-decoration: none; border-radius: 3px; border: none; cursor: pointer; font-size: 13px;
         }
         .btn:hover { background: #2980b9; }
         .btn-success { background: #27ae60; font-size: 14px; padding: 10px 25px; }
         .btn-success:hover { background: #219a52; }
         .btn:disabled { background: #95a5a6; cursor: not-allowed; }
+        .btn svg { width: 16px; height: 16px; fill: currentColor; }
 
         .alert {
             padding: 12px 15px; border-radius: 3px; margin-bottom: 20px; font-size: 13px;
@@ -224,31 +228,49 @@ $timetable_count = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetc
         .info-box { background: #e8f4f8; border-left: 4px solid #3498db; padding: 12px 15px; margin: 15px 0; border-radius: 0 3px 3px 0; font-size: 13px; }
         .constraint-list { list-style: none; margin: 10px 0; font-size: 13px; }
         .constraint-list li { padding: 6px 0; border-bottom: 1px solid #ecf0f1; }
-        .constraint-list li:before { content: "✓"; color: #27ae60; margin-right: 8px; }
+        .constraint-list li:before { content: "¹3"; color: #27ae60; margin-right: 8px; }
     </style>
 </head>
 <body>
+    <svg style="display:none">
+        <defs>
+            <symbol id="icon-dashboard" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></symbol>
+            <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.59.91l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
+            <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></symbol>
+            <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></symbol>
+            <symbol id="icon-rocket" viewBox="0 0 24 24"><path d="M12 2.5s-4 5.5-4 10.5c0 2.5 1.5 4.5 4 4.5s4-2 4-4.5c0-5-4-10.5-4-10.5zm0 14c-1.1 0-2-.9-2-2 0-.55.22-1.05.59-1.41.36-.37.86-.59 1.41-.59s1.05.22 1.41.59c.37.36.59.86.59 1.41 0 1.1-.9 2-2 2zM7 22.5c-1.66 0-3-1.34-3-3 0-1.1.6-2.06 1.46-2.56.24-.14.5-.22.77-.27.27-.05.55-.08.83-.08.28 0 .56.03.83.08.27.05.53.13.77.27.86.5 1.46 1.46 1.46 2.56 0 1.66-1.34 3-3 3zM17 22.5c-1.66 0-3-1.34-3-3 0-1.1.6-2.06 1.46-2.56.24-.14.5-.22.77-.27.27-.05.55-.08.83-.08.28 0 .56.03.83.08.27.05.53.13.77.27.86.5 1.46 1.46 1.46 2.56 0 1.66-1.34 3-3 3z"/></symbol>
+        </defs>
+    </svg>
+
     <div class="sidebar">
         <div class="sidebar-header">
             <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#6B1B5E;font-weight:bold;font-size:18px;">A</div>
             <h2>Ajeenkya DY Patil<br><span style="font-size:11px;font-weight:400;opacity:0.8;">University ERP</span></h2>
         </div>
         <div class="sidebar-menu">
-            <a href="index.php" class="menu-item"><span>📊</span> Dashboard</a>
+            <a href="index.php" class="menu-item">
+                <svg><use href="#icon-dashboard"/></svg> Dashboard
+            </a>
             <div class="menu-section">Timetable</div>
-            <a href="setup.php" class="menu-item"><span>⚙️</span> Manage Data</a>
-            <a href="generate.php" class="menu-item active"><span>🔄</span> Generate Timetable</a>
-            <a href="view.php" class="menu-item"><span>👁️</span> View Timetable</a>
+            <a href="setup.php" class="menu-item">
+                <svg><use href="#icon-settings"/></svg> Manage Data
+            </a>
+            <a href="generate.php" class="menu-item active">
+                <svg><use href="#icon-refresh"/></svg> Generate Timetable
+            </a>
+            <a href="view.php" class="menu-item">
+                <svg><use href="#icon-eye"/></svg> View Timetable
+            </a>
         </div>
     </div>
 
     <div class="top-header">
         <div class="top-header-left">
-            <span style="font-size:18px;cursor:pointer;">☰</span>
+            <span style="font-size:18px;cursor:pointer;">&#9776;</span>
             <span>Active Academic Year: 2025-26 Summer Term</span>
         </div>
         <div class="top-header-right">
-            <span>🔔 0</span>
+            <span>&#128276; 0</span>
             <span>Welcome, User</span>
             <a href="#">Logout</a>
         </div>
@@ -277,7 +299,7 @@ $timetable_count = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetc
 
                 <?php if ($total_required_slots > $total_slots_per_week * count($class_list)): ?>
                     <div class="alert alert-error">
-                        ⚠️ <strong>Constraint Issue:</strong> You need <?php echo $total_required_slots; ?> slots but only have <?php echo $total_slots_per_week * count($class_list); ?> available.
+                        <strong>Constraint Issue:</strong> You need <?php echo $total_required_slots; ?> slots but only have <?php echo $total_slots_per_week * count($class_list); ?> available.
                     </div>
                 <?php endif; ?>
             </div>
@@ -310,7 +332,7 @@ $timetable_count = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetc
                 </p>
                 <form method="POST">
                     <button type="submit" name="generate" value="1" class="btn btn-success" <?php echo (!$can_generate || $total_required_slots > $total_slots_per_week * count($class_list)) ? 'disabled' : ''; ?>>
-                        🚀 Generate Timetable Now
+                        <svg><use href="#icon-rocket"/></svg> Generate Timetable Now
                     </button>
                 </form>
                 <?php if (!$can_generate): ?>
@@ -323,7 +345,7 @@ $timetable_count = $conn->query("SELECT COUNT(*) as count FROM timetable")->fetc
         <div class="content-box">
             <div class="content-box-header">Generated Timetable Preview</div>
             <div class="content-box-body">
-                <a href="view.php" class="btn">View Full Timetable →</a>
+                <a href="view.php" class="btn">View Full Timetable &rarr;</a>
             </div>
         </div>
         <?php endif; ?>
