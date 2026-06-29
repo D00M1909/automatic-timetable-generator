@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
             $class_daily_schedule = [];
             $faculty_daily_schedule = [];
             $room_daily_schedule = [];
-            $class_room_tracking = []; // track last room per class per day for energy efficiency
+            $class_room_tracking = []; 
 
             $success = true;
             $errors = [];
@@ -84,57 +84,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                     $lab_hours = $assignment['lab_hours_per_week'];
                     $subject_type = $assignment['subject_type'];
 
-                    // Respect subject_type
                     if ($subject_type === 'lecture') $lab_hours = 0;
                     if ($subject_type === 'lab') $lecture_hours = 0;
 
-                    // Place lectures
+                    // --- PLACE LECTURES ---
                     $lectures_placed = 0;
                     $attempts = 0;
-                    $max_attempts = 2000;
-
+                    $max_attempts = 1000;
+                    
                     while ($lectures_placed < $lecture_hours && $attempts < $max_attempts) {
                         $attempts++;
-
-                        // Score-based slot selection instead of pure random
                         $best_score = -9999;
                         $best_day = null;
                         $best_slot = null;
                         $best_room = null;
+                        
+                        $bottlenecks = []; // Track why placement fails
 
                         foreach ($days as $day) {
                             foreach ($class_slots as $slot) {
                                 $day_id = $day['day_id'];
                                 $slot_id = $slot['slot_id'];
 
-                                // Hard constraints
-                                if (isset($class_daily_schedule[$class_id][$day_id][$slot_id])) continue;
-                                if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot_id])) continue;
-                                if (isset($faculty_blocked[$faculty_id][$day_id][$slot_id])) continue;
+                                if (isset($class_daily_schedule[$class_id][$day_id][$slot_id])) {
+                                    $bottlenecks[] = "Class already has a session"; continue;
+                                }
+                                if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot_id])) {
+                                    $bottlenecks[] = "Faculty {$assignment['faculty_name']} double-booked"; continue;
+                                }
+                                if (isset($faculty_blocked[$faculty_id][$day_id][$slot_id])) {
+                                    $bottlenecks[] = "Faculty explicitly blocked/unavailable"; continue;
+                                }
 
                                 $faculty_day_hours = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
                                 $faculty_week_hours = $faculty_weekly_hours[$faculty_id] ?? 0;
-                                if ($faculty_day_hours >= $assignment['max_hours_per_day']) continue;
-                                if ($faculty_week_hours >= $assignment['max_hours_per_week']) continue;
+                                if ($faculty_day_hours >= $assignment['max_hours_per_day']) {
+                                    $bottlenecks[] = "Faculty max daily hours reached"; continue;
+                                }
+                                if ($faculty_week_hours >= $assignment['max_hours_per_week']) {
+                                    $bottlenecks[] = "Faculty max weekly hours reached"; continue;
+                                }
 
-                                // Find best room
                                 $room_score = -9999;
                                 $selected_room = null;
+                                $room_bottlenecks = [];
+
                                 foreach ($rooms as $room) {
-                                    if ($room['room_type'] !== 'classroom' && $room['room_type'] !== 'seminar') continue;
-                                    if ($room['capacity'] < $class_strength) continue;
-                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
-                                    if (isset($room_blocked[$room['room_id']][$day_id][$slot_id])) continue;
+                                    if ($room['room_type'] !== 'classroom' && $room['room_type'] !== 'seminar') {
+                                        $room_bottlenecks[] = "Wrong room type"; continue;
+                                    }
+                                    if ($room['capacity'] < $class_strength) {
+                                        $room_bottlenecks[] = "Room capacity too small"; continue;
+                                    }
+                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) {
+                                        $room_bottlenecks[] = "Room occupied"; continue;
+                                    }
+                                    if (isset($room_blocked[$room['room_id']][$day_id][$slot_id])) {
+                                        $room_bottlenecks[] = "Room unavailable"; continue;
+                                    }
 
                                     $rs = 0;
-                                    // Prefer same building as previous slot (energy efficiency)
                                     $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
-                                    if ($prev_building && $prev_building == $room['building_id']) {
-                                        $rs += 15; // Energy bonus
-                                    }
-                                    // Prefer AC rooms in summer (if configured)
+                                    if ($prev_building && $prev_building == $room['building_id']) $rs += 15;
                                     if ($room['has_ac'] || $room['building_ac']) $rs += 5;
-                                    // Prefer smaller adequate rooms (efficiency)
                                     $rs += max(0, 20 - abs($room['capacity'] - $class_strength));
 
                                     if ($rs > $room_score) {
@@ -142,18 +154,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                         $selected_room = $room;
                                     }
                                 }
-                                if (!$selected_room) continue;
+                                
+                                if (!$selected_room) {
+                                    $bottlenecks = array_merge($bottlenecks, $room_bottlenecks);
+                                    continue;
+                                }
 
-                                // Score this slot
                                 $score = $room_score;
-                                // Spread across days (penalize same day)
                                 $day_count = 0;
                                 foreach ($class_slots as $s) {
                                     if (isset($class_daily_schedule[$class_id][$day_id][$s['slot_id']])) $day_count++;
                                 }
                                 $score -= $day_count * 3;
-
-                                // Prefer earlier slots slightly
                                 $score -= $slot['slot_number'] * 0.5;
 
                                 if ($score > $best_score) {
@@ -183,16 +195,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                             $class_room_tracking[$class_id][$day_id] = $best_room['building_id'];
                             $lectures_placed++;
                         } else {
-                            break; // No valid slot found
+                            // Compile unique bottlenecks for reporting
+                            $unique_bottlenecks = array_unique($bottlenecks);
+                            $errors[] = "Lecture placement failed for {$assignment['subject_name']} ({$assignment['class_name']}). Bottlenecks: " . implode(", ", array_slice($unique_bottlenecks, 0, 3));
+                            $success = false;
+                            break; 
                         }
                     }
 
-                    if ($lectures_placed < $lecture_hours) {
-                        $errors[] = "Could not place all lecture hours ({$lectures_placed}/{$lecture_hours}) for {$assignment['subject_name']} in {$assignment['class_name']}.";
-                        $success = false;
-                    }
-
-                    // Place labs
+                    // --- PLACE LABS ---
                     $labs_placed = 0;
                     $lab_attempts = 0;
                     $max_lab_attempts = 1000;
@@ -203,6 +214,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                         $best_day = null;
                         $best_idx = null;
                         $best_room = null;
+                        
+                        $bottlenecks = [];
 
                         foreach ($days as $day) {
                             $day_id = $day['day_id'];
@@ -211,27 +224,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                 $slot2 = $class_slots[$i + 1];
 
                                 if (isset($class_daily_schedule[$class_id][$day_id][$slot1['slot_id']]) || 
-                                    isset($class_daily_schedule[$class_id][$day_id][$slot2['slot_id']])) continue;
+                                    isset($class_daily_schedule[$class_id][$day_id][$slot2['slot_id']])) {
+                                    $bottlenecks[] = "Class busy during consecutive slots"; continue;
+                                }
                                 if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot1['slot_id']]) || 
-                                    isset($faculty_daily_schedule[$faculty_id][$day_id][$slot2['slot_id']])) continue;
+                                    isset($faculty_daily_schedule[$faculty_id][$day_id][$slot2['slot_id']])) {
+                                    $bottlenecks[] = "Faculty double-booked"; continue;
+                                }
                                 if (isset($faculty_blocked[$faculty_id][$day_id][$slot1['slot_id']]) || 
-                                    isset($faculty_blocked[$faculty_id][$day_id][$slot2['slot_id']])) continue;
+                                    isset($faculty_blocked[$faculty_id][$day_id][$slot2['slot_id']])) {
+                                    $bottlenecks[] = "Faculty blocked"; continue;
+                                }
 
                                 $faculty_day_hours = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
                                 $faculty_week_hours = $faculty_weekly_hours[$faculty_id] ?? 0;
-                                if (($faculty_day_hours + 2) > $assignment['max_hours_per_day']) continue;
-                                if (($faculty_week_hours + 2) > $assignment['max_hours_per_week']) continue;
+                                if (($faculty_day_hours + 2) > $assignment['max_hours_per_day']) {
+                                    $bottlenecks[] = "Faculty daily limit exceeded"; continue;
+                                }
+                                if (($faculty_week_hours + 2) > $assignment['max_hours_per_week']) {
+                                    $bottlenecks[] = "Faculty weekly limit exceeded"; continue;
+                                }
 
-                                // Find lab room for 2 consecutive slots
                                 $room_score = -9999;
                                 $selected_room = null;
+                                $room_bottlenecks = [];
+                                
                                 foreach ($rooms as $room) {
-                                    if ($room['room_type'] !== 'lab') continue;
-                                    if ($room['capacity'] < $class_strength) continue;
+                                    if ($room['room_type'] !== 'lab') {
+                                        $room_bottlenecks[] = "No lab rooms"; continue;
+                                    }
+                                    if ($room['capacity'] < $class_strength) {
+                                        $room_bottlenecks[] = "Lab capacity too small"; continue;
+                                    }
                                     if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) || 
-                                        isset($room_daily_schedule[$room['room_id']][$day_id][$slot2['slot_id']])) continue;
+                                        isset($room_daily_schedule[$room['room_id']][$day_id][$slot2['slot_id']])) {
+                                        $room_bottlenecks[] = "Lab occupied"; continue;
+                                    }
                                     if (isset($room_blocked[$room['room_id']][$day_id][$slot1['slot_id']]) || 
-                                        isset($room_blocked[$room['room_id']][$day_id][$slot2['slot_id']])) continue;
+                                        isset($room_blocked[$room['room_id']][$day_id][$slot2['slot_id']])) {
+                                        $room_bottlenecks[] = "Lab unavailable"; continue;
+                                    }
 
                                     $rs = 0;
                                     $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
@@ -244,7 +276,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                         $selected_room = $room;
                                     }
                                 }
-                                if (!$selected_room) continue;
+                                if (!$selected_room) {
+                                    $bottlenecks = array_merge($bottlenecks, $room_bottlenecks);
+                                    continue;
+                                }
 
                                 $score = $room_score;
                                 $day_count = 0;
@@ -283,13 +318,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                             $class_room_tracking[$class_id][$day_id] = $best_room['building_id'];
                             $labs_placed += 2;
                         } else {
+                            $unique_bottlenecks = array_unique($bottlenecks);
+                            $errors[] = "Lab placement failed for {$assignment['subject_name']} ({$assignment['class_name']}). Bottlenecks: " . implode(", ", array_slice($unique_bottlenecks, 0, 3));
+                            $success = false;
                             break;
                         }
-                    }
-
-                    if ($labs_placed < $lab_hours && $lab_hours > 0) {
-                        $errors[] = "Could not place all lab hours ({$labs_placed}/{$lab_hours}) for {$assignment['subject_name']} in {$assignment['class_name']}.";
-                        $success = false;
                     }
                 }
             }
@@ -301,8 +334,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                 audit_log($conn, 'GENERATE_SUCCESS', "Timetable generated with " . count($assignment_list) . " assignments");
             } else {
                 $conn->rollback();
-                $message = "Generation failed due to hard constraints. Adjust data and try again.";
-                if (!empty($errors)) { $message .= "<br>" . implode("<br>", array_slice($errors, 0, 5)); }
+                $message = "Generation failed due to hard constraints. Please review bottlenecks below.";
+                if (!empty($errors)) { 
+                    $message .= "<ul style='margin-top:10px; padding-left:20px; font-size:12px;'><li>" . implode("</li><li>", array_slice($errors, 0, 8)) . "</li></ul>"; 
+                }
                 $message_type = "error";
                 audit_log($conn, 'GENERATE_FAIL', implode("; ", array_slice($errors, 0, 5)));
             }

@@ -78,14 +78,6 @@ function pdf_export_link($mode, $id) {
         .legend-item { display: flex; align-items: center; gap: 6px; }
         .legend-box { width: 16px; height: 16px; border: 1px solid #ddd; }
         .print-header { display: none; }
-        @media print {
-            .sidebar, .top-header, .filter-bar, .view-toggle, .btn-print { display: none; }
-            .content-wrapper { margin-left: 0; margin-top: 0; }
-            .content-box { box-shadow: none; border: 1px solid #ddd; }
-            .print-header { display: block; text-align: center; margin-bottom: 20px; }
-            .print-header h2 { font-size: 18px; color: #6B1B5E; }
-            .print-header p { font-size: 12px; color: #666; }
-        }
     </style>
 </head>
 <body>

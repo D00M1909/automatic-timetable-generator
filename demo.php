@@ -184,10 +184,6 @@ $predictions = [
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
         .live-indicator { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #27ae60; font-weight: 600; }
         .live-dot { width: 8px; height: 8px; background: #27ae60; border-radius: 50%; animation: pulse 2s infinite; }
-        @media print {
-            .sidebar, .top-header, .demo-hero { display: none; }
-            .content-wrapper { margin-left: 0; margin-top: 0; }
-        }
     </style>
 </head>
 <body>
@@ -210,7 +206,6 @@ $predictions = [
             </div>
         </div>
 
-        <!-- AI Metrics -->
         <div class="metrics-grid">
             <?php foreach ($ai_metrics as $m): ?>
             <div class="metric-card" style="border-top-color: <?php echo $m['color']; ?>">
@@ -221,7 +216,6 @@ $predictions = [
             <?php endforeach; ?>
         </div>
 
-        <!-- Demo Timetable -->
         <div class="demo-section">
             <h3><svg><use href="#icon-eye"/></svg> Sample AI-Generated Timetable (FY-A)</h3>
             <div class="content-box" style="margin:0;">
@@ -278,9 +272,7 @@ $predictions = [
             </div>
         </div>
 
-        <!-- Analytics Row -->
         <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));gap:20px;margin-bottom:25px;">
-            <!-- Faculty Workload -->
             <div class="chart-container">
                 <h3 style="font-size:14px;color:#333;margin-bottom:15px;"><svg width="18" height="18" fill="#6B1B5E" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg> Faculty Workload Distribution</h3>
                 <div class="bar-chart">
@@ -300,7 +292,6 @@ $predictions = [
                 <p style="font-size:11px;color:#888;margin-top:10px;">Rightmost column shows AI-calculated preference satisfaction score.</p>
             </div>
 
-            <!-- Room Utilization Heatmap -->
             <div class="chart-container">
                 <h3 style="font-size:14px;color:#333;margin-bottom:15px;"><svg width="18" height="18" fill="#6B1B5E" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10z"/></svg> Room Utilization Heatmap</h3>
                 <div class="heatmap-grid">
@@ -320,7 +311,6 @@ $predictions = [
             </div>
         </div>
 
-        <!-- Predictive Analytics -->
         <div class="demo-section">
             <h3><svg width="20" height="20" fill="#6B1B5E" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg> Predictive Analytics & Insights</h3>
             <?php foreach ($predictions as $pred): ?>
@@ -334,7 +324,6 @@ $predictions = [
             <?php endforeach; ?>
         </div>
 
-        <!-- Feature Showcase -->
         <div class="demo-section">
             <h3><svg width="20" height="20" fill="#6B1B5E" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg> Core AI Features Implemented</h3>
             <div class="feature-showcase">
@@ -371,7 +360,6 @@ $predictions = [
             </div>
         </div>
 
-        <!-- NAAC Compliance -->
         <div class="content-box" style="margin-bottom:25px;">
             <div class="content-box-header">NAAC / NBA Compliance Support</div>
             <div class="content-box-body">
