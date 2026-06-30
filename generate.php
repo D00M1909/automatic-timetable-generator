@@ -4,354 +4,253 @@ require_once 'config.php';
 $message = '';
 $message_type = '';
 
-// Fetch data
-$classes = db_get_rows($conn, "SELECT * FROM classes WHERE year_id IN (SELECT year_id FROM years WHERE year_status='active')");
+// Fetch active data for generation
+$classes = db_get_rows($conn, "SELECT * FROM classes WHERE year_id IN (SELECT year_id FROM years WHERE year_status='active') ORDER BY class_name");
 $working_days = db_get_rows($conn, "SELECT * FROM working_days WHERE is_working=1 ORDER BY day_order");
 $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORDER BY slot_number");
 $assignments = db_get_rows($conn, "SELECT sa.*, s.subject_name, s.subject_type, s.lecture_hours_per_week, s.lab_hours_per_week, f.faculty_name, f.max_hours_per_day, f.max_hours_per_week, c.class_name, c.strength FROM subject_assignments sa JOIN subjects s ON sa.subject_id = s.subject_id JOIN faculty f ON sa.faculty_id = f.faculty_id JOIN classes c ON sa.class_id = c.class_id ORDER BY sa.class_id, sa.subject_id");
 $rooms = db_get_rows($conn, "SELECT r.*, b.building_name, b.has_ac as building_ac FROM rooms r JOIN buildings b ON r.building_id = b.building_id WHERE r.room_type IN ('classroom','lab','seminar') ORDER BY r.capacity");
 $faculty_unavailable = db_get_rows($conn, "SELECT * FROM faculty_unavailable");
 $room_unavailable = db_get_rows($conn, "SELECT * FROM room_unavailable");
-$faculty_absences = db_get_rows($conn, "SELECT * FROM faculty_absences WHERE status='pending'");
 
 $days = $working_days;
-$slots = $time_slots;
-$class_slots = array_filter($slots, function($s) { return $s['slot_type'] === 'class'; });
-$class_slots = array_values($class_slots); // reindex
-$assignment_list = $assignments;
-$class_list = $classes;
+$class_slots = array_values(array_filter($time_slots, function($s) { return $s['slot_type'] === 'class'; }));
 
-$can_generate = count($class_list) > 0 && count($assignment_list) > 0 && count($days) > 0 && count($class_slots) > 0 && count($rooms) > 0;
-$total_slots_per_week = count($days) * count($class_slots);
+$can_generate = count($classes) > 0 && count($assignments) > 0 && count($days) > 0 && count($class_slots) > 0 && count($rooms) > 0;
 $total_required_slots = 0;
-foreach ($assignment_list as $a) { $total_required_slots += $a['lecture_hours_per_week'] + $a['lab_hours_per_week']; }
-
-// Pre-compute blocked maps for fast lookup
-$faculty_blocked = [];
-foreach ($faculty_unavailable as $fu) {
-    $faculty_blocked[$fu['faculty_id']][$fu['day_id']][$fu['slot_id']] = true;
-}
-foreach ($faculty_absences as $fa) {
-    $faculty_blocked[$fa['faculty_id']][$fa['day_id']][$fa['slot_id']] = true;
-}
-$room_blocked = [];
-foreach ($room_unavailable as $ru) {
-    $room_blocked[$ru['room_id']][$ru['day_id']][$ru['slot_id']] = true;
-}
+foreach ($assignments as $a) { $total_required_slots += $a['lecture_hours_per_week'] + $a['lab_hours_per_week']; }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
     csrf_check();
 
     if (!$can_generate) {
-        $message = "Cannot generate: Missing required data (ensure classes, assignments, rooms, and time slots are configured).";
+        $message = "Cannot generate: Missing required data (ensure you have active classes, subjects, faculty, and rooms).";
         $message_type = "error";
-        audit_log($conn, 'GENERATE_FAIL', $message);
+        audit_log($conn, 'GENERATE_FAIL', "Insufficient data to generate timetable");
     } else {
-        $conn->begin_transaction();
-        try {
-            $conn->query("DELETE FROM timetable");
+        // Check if there's enough capacity
+        $total_available_slots = count($days) * count($class_slots) * count($classes);
+        if ($total_required_slots > $total_available_slots) {
+            $message = "Not enough slots available! Required: $total_required_slots, Available: $total_available_slots";
+            $message_type = "error";
+            audit_log($conn, 'GENERATE_FAIL', "Capacity exceeded");
+        } else {
+            $conn->begin_transaction();
+            try {
+                // Clear existing timetable
+                $conn->query("DELETE FROM timetable");
+                
+                $faculty_daily_hours = [];
+                $faculty_weekly_hours = [];
+                $class_daily_schedule = [];
+                $faculty_daily_schedule = [];
+                $room_daily_schedule = [];
+                $class_room_tracking = []; 
+                $errors = [];
 
-            $faculty_daily_hours = [];
-            $faculty_weekly_hours = [];
-            $class_daily_schedule = [];
-            $faculty_daily_schedule = [];
-            $room_daily_schedule = [];
-            $class_room_tracking = []; 
-
-            $success = true;
-            $errors = [];
-
-            // Sort assignments: labs first (harder to place), then by total hours descending
-            usort($assignment_list, function($a, $b) {
-                $a_total = $a['lab_hours_per_week'] + $a['lecture_hours_per_week'];
-                $b_total = $b['lab_hours_per_week'] + $b['lecture_hours_per_week'];
-                if ($a['lab_hours_per_week'] != $b['lab_hours_per_week']) {
-                    return $b['lab_hours_per_week'] - $a['lab_hours_per_week'];
+                // Pre-load explicitly blocked times
+                foreach ($faculty_unavailable as $fu) { 
+                    $faculty_daily_schedule[$fu['faculty_id']][$fu['day_id']][$fu['slot_id']] = true; 
                 }
-                return $b_total - $a_total;
-            });
+                foreach ($room_unavailable as $ru) { 
+                    $room_daily_schedule[$ru['room_id']][$ru['day_id']][$ru['slot_id']] = true; 
+                }
 
-            foreach ($class_list as $class) {
-                $class_id = $class['class_id'];
-                $class_strength = $class['strength'];
-                $class_assignments = array_filter($assignment_list, function($a) use ($class_id) { return $a['class_id'] == $class_id; });
+                // Sort assignments: Labs first, then largest hour loads
+                usort($assignments, function($a, $b) {
+                    if ($a['lab_hours_per_week'] != $b['lab_hours_per_week']) 
+                        return $b['lab_hours_per_week'] - $a['lab_hours_per_week'];
+                    return ($b['lecture_hours_per_week'] + $b['lab_hours_per_week']) - 
+                           ($a['lecture_hours_per_week'] + $a['lab_hours_per_week']);
+                });
 
-                foreach ($class_assignments as $assignment) {
-                    $assignment_id = $assignment['assignment_id'];
-                    $subject_id = $assignment['subject_id'];
-                    $faculty_id = $assignment['faculty_id'];
-                    $lecture_hours = $assignment['lecture_hours_per_week'];
-                    $lab_hours = $assignment['lab_hours_per_week'];
-                    $subject_type = $assignment['subject_type'];
+                foreach ($classes as $class) {
+                    $class_id = $class['class_id'];
+                    $class_strength = $class['strength'];
+                    $class_assignments = array_filter($assignments, function($a) use ($class_id) { 
+                        return $a['class_id'] == $class_id; 
+                    });
 
-                    if ($subject_type === 'lecture') $lab_hours = 0;
-                    if ($subject_type === 'lab') $lecture_hours = 0;
+                    foreach ($class_assignments as $assignment) {
+                        $assignment_id = $assignment['assignment_id'];
+                        $subject_id = $assignment['subject_id'];
+                        $faculty_id = $assignment['faculty_id'];
+                        $lecture_hours = $assignment['subject_type'] === 'lab' ? 0 : $assignment['lecture_hours_per_week'];
+                        $lab_hours = $assignment['subject_type'] === 'lecture' ? 0 : $assignment['lab_hours_per_week'];
 
-                    // --- PLACE LECTURES ---
-                    $lectures_placed = 0;
-                    $attempts = 0;
-                    $max_attempts = 1000;
-                    
-                    while ($lectures_placed < $lecture_hours && $attempts < $max_attempts) {
-                        $attempts++;
-                        $best_score = -9999;
-                        $best_day = null;
-                        $best_slot = null;
-                        $best_room = null;
-                        
-                        $bottlenecks = []; // Track why placement fails
+                        // --- PLACE LABS (Requires 2 consecutive slots) ---
+                        $labs_placed = 0;
+                        while ($labs_placed < $lab_hours) {
+                            $best_score = -9999;
+                            $best_day = null; 
+                            $best_idx = null; 
+                            $best_room = null;
 
-                        foreach ($days as $day) {
-                            foreach ($class_slots as $slot) {
+                            foreach ($days as $day) {
                                 $day_id = $day['day_id'];
-                                $slot_id = $slot['slot_id'];
+                                for ($i = 0; $i < count($class_slots) - 1; $i++) {
+                                    $slot1 = $class_slots[$i];
+                                    $slot2 = $class_slots[$i + 1];
 
-                                if (isset($class_daily_schedule[$class_id][$day_id][$slot_id])) {
-                                    $bottlenecks[] = "Class already has a session"; continue;
-                                }
-                                if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot_id])) {
-                                    $bottlenecks[] = "Faculty {$assignment['faculty_name']} double-booked"; continue;
-                                }
-                                if (isset($faculty_blocked[$faculty_id][$day_id][$slot_id])) {
-                                    $bottlenecks[] = "Faculty explicitly blocked/unavailable"; continue;
-                                }
+                                    // Check Conflicts
+                                    if (isset($class_daily_schedule[$class_id][$day_id][$slot1['slot_id']]) || 
+                                        isset($class_daily_schedule[$class_id][$day_id][$slot2['slot_id']])) continue;
+                                    
+                                    if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot1['slot_id']]) || 
+                                        isset($faculty_daily_schedule[$faculty_id][$day_id][$slot2['slot_id']])) continue;
+                                    
+                                    $f_day_hrs = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
+                                    $f_week_hrs = $faculty_weekly_hours[$faculty_id] ?? 0;
+                                    if (($f_day_hrs + 2) > $assignment['max_hours_per_day'] || 
+                                        ($f_week_hrs + 2) > $assignment['max_hours_per_week']) continue;
 
-                                $faculty_day_hours = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
-                                $faculty_week_hours = $faculty_weekly_hours[$faculty_id] ?? 0;
-                                if ($faculty_day_hours >= $assignment['max_hours_per_day']) {
-                                    $bottlenecks[] = "Faculty max daily hours reached"; continue;
-                                }
-                                if ($faculty_week_hours >= $assignment['max_hours_per_week']) {
-                                    $bottlenecks[] = "Faculty max weekly hours reached"; continue;
-                                }
+                                    // Score Rooms
+                                    foreach ($rooms as $room) {
+                                        if ($room['room_type'] !== 'lab' || $room['capacity'] < $class_strength) continue;
+                                        if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) || 
+                                            isset($room_daily_schedule[$room['room_id']][$day_id][$slot2['slot_id']])) continue;
 
-                                $room_score = -9999;
-                                $selected_room = null;
-                                $room_bottlenecks = [];
+                                        $score = 0;
+                                        if ($room['has_ac'] || $room['building_ac']) $score += 10;
+                                        $score += max(0, 20 - abs($room['capacity'] - $class_strength));
 
-                                foreach ($rooms as $room) {
-                                    if ($room['room_type'] !== 'classroom' && $room['room_type'] !== 'seminar') {
-                                        $room_bottlenecks[] = "Wrong room type"; continue;
-                                    }
-                                    if ($room['capacity'] < $class_strength) {
-                                        $room_bottlenecks[] = "Room capacity too small"; continue;
-                                    }
-                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) {
-                                        $room_bottlenecks[] = "Room occupied"; continue;
-                                    }
-                                    if (isset($room_blocked[$room['room_id']][$day_id][$slot_id])) {
-                                        $room_bottlenecks[] = "Room unavailable"; continue;
-                                    }
-
-                                    $rs = 0;
-                                    $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
-                                    if ($prev_building && $prev_building == $room['building_id']) $rs += 15;
-                                    if ($room['has_ac'] || $room['building_ac']) $rs += 5;
-                                    $rs += max(0, 20 - abs($room['capacity'] - $class_strength));
-
-                                    if ($rs > $room_score) {
-                                        $room_score = $rs;
-                                        $selected_room = $room;
+                                        if ($score > $best_score) {
+                                            $best_score = $score; 
+                                            $best_day = $day; 
+                                            $best_idx = $i; 
+                                            $best_room = $room;
+                                        }
                                     }
                                 }
-                                
-                                if (!$selected_room) {
-                                    $bottlenecks = array_merge($bottlenecks, $room_bottlenecks);
-                                    continue;
-                                }
+                            }
 
-                                $score = $room_score;
-                                $day_count = 0;
-                                foreach ($class_slots as $s) {
-                                    if (isset($class_daily_schedule[$class_id][$day_id][$s['slot_id']])) $day_count++;
+                            if ($best_day && $best_idx !== null && $best_room) {
+                                $day_id = $best_day['day_id'];
+                                foreach ([$class_slots[$best_idx], $class_slots[$best_idx + 1]] as $slot) {
+                                    $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)");
+                                    $stmt->bind_param("iiiiiiii", $class_id, $day_id, $slot['slot_id'], $best_room['room_id'], $subject_id, $faculty_id, $assignment_id, $best_score);
+                                    $stmt->execute();
+                                    $stmt->close();
+                                    
+                                    $class_daily_schedule[$class_id][$day_id][$slot['slot_id']] = $subject_id;
+                                    $faculty_daily_schedule[$faculty_id][$day_id][$slot['slot_id']] = true;
+                                    $room_daily_schedule[$best_room['room_id']][$day_id][$slot['slot_id']] = true;
+                                    $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id] ?? 0) + 1;
+                                    $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id] ?? 0) + 1;
                                 }
-                                $score -= $day_count * 3;
-                                $score -= $slot['slot_number'] * 0.5;
-
-                                if ($score > $best_score) {
-                                    $best_score = $score;
-                                    $best_day = $day;
-                                    $best_slot = $slot;
-                                    $best_room = $selected_room;
-                                }
+                                $labs_placed += 2;
+                            } else {
+                                $errors[] = "Failed to place Lab: {$assignment['subject_name']} for {$assignment['class_name']}";
+                                break;
                             }
                         }
 
-                        if ($best_day && $best_slot && $best_room) {
-                            $day_id = $best_day['day_id'];
-                            $slot_id = $best_slot['slot_id'];
-                            $room_id = $best_room['room_id'];
+                        // --- PLACE LECTURES (Single slots) ---
+                        $lectures_placed = 0;
+                        while ($lectures_placed < $lecture_hours) {
+                            $best_score = -9999;
+                            $best_day = null; 
+                            $best_slot = null; 
+                            $best_room = null;
 
-                            $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
-                            $stmt->bind_param("iiiiiiii", $class_id, $day_id, $slot_id, $room_id, $subject_id, $faculty_id, $assignment_id, $best_score);
-                            $stmt->execute();
-                            $stmt->close();
+                            foreach ($days as $day) {
+                                $day_id = $day['day_id'];
+                                foreach ($class_slots as $slot) {
+                                    $slot_id = $slot['slot_id'];
 
-                            $class_daily_schedule[$class_id][$day_id][$slot_id] = true;
-                            $faculty_daily_schedule[$faculty_id][$day_id][$slot_id] = true;
-                            $room_daily_schedule[$room_id][$day_id][$slot_id] = true;
-                            $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id] ?? 0) + 1;
-                            $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id] ?? 0) + 1;
-                            $class_room_tracking[$class_id][$day_id] = $best_room['building_id'];
-                            $lectures_placed++;
-                        } else {
-                            // Compile unique bottlenecks for reporting
-                            $unique_bottlenecks = array_unique($bottlenecks);
-                            $errors[] = "Lecture placement failed for {$assignment['subject_name']} ({$assignment['class_name']}). Bottlenecks: " . implode(", ", array_slice($unique_bottlenecks, 0, 3));
-                            $success = false;
-                            break; 
-                        }
-                    }
+                                    // Check Conflicts
+                                    if (isset($class_daily_schedule[$class_id][$day_id][$slot_id]) || 
+                                        isset($faculty_daily_schedule[$faculty_id][$day_id][$slot_id])) continue;
+                                    
+                                    $f_day_hrs = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
+                                    $f_week_hrs = $faculty_weekly_hours[$faculty_id] ?? 0;
+                                    if ($f_day_hrs >= $assignment['max_hours_per_day'] || 
+                                        $f_week_hrs >= $assignment['max_hours_per_week']) continue;
 
-                    // --- PLACE LABS ---
-                    $labs_placed = 0;
-                    $lab_attempts = 0;
-                    $max_lab_attempts = 1000;
-
-                    while ($labs_placed < $lab_hours && $lab_attempts < $max_lab_attempts) {
-                        $lab_attempts++;
-                        $best_score = -9999;
-                        $best_day = null;
-                        $best_idx = null;
-                        $best_room = null;
-                        
-                        $bottlenecks = [];
-
-                        foreach ($days as $day) {
-                            $day_id = $day['day_id'];
-                            for ($i = 0; $i < count($class_slots) - 1; $i++) {
-                                $slot1 = $class_slots[$i];
-                                $slot2 = $class_slots[$i + 1];
-
-                                if (isset($class_daily_schedule[$class_id][$day_id][$slot1['slot_id']]) || 
-                                    isset($class_daily_schedule[$class_id][$day_id][$slot2['slot_id']])) {
-                                    $bottlenecks[] = "Class busy during consecutive slots"; continue;
-                                }
-                                if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot1['slot_id']]) || 
-                                    isset($faculty_daily_schedule[$faculty_id][$day_id][$slot2['slot_id']])) {
-                                    $bottlenecks[] = "Faculty double-booked"; continue;
-                                }
-                                if (isset($faculty_blocked[$faculty_id][$day_id][$slot1['slot_id']]) || 
-                                    isset($faculty_blocked[$faculty_id][$day_id][$slot2['slot_id']])) {
-                                    $bottlenecks[] = "Faculty blocked"; continue;
-                                }
-
-                                $faculty_day_hours = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
-                                $faculty_week_hours = $faculty_weekly_hours[$faculty_id] ?? 0;
-                                if (($faculty_day_hours + 2) > $assignment['max_hours_per_day']) {
-                                    $bottlenecks[] = "Faculty daily limit exceeded"; continue;
-                                }
-                                if (($faculty_week_hours + 2) > $assignment['max_hours_per_week']) {
-                                    $bottlenecks[] = "Faculty weekly limit exceeded"; continue;
-                                }
-
-                                $room_score = -9999;
-                                $selected_room = null;
-                                $room_bottlenecks = [];
-                                
-                                foreach ($rooms as $room) {
-                                    if ($room['room_type'] !== 'lab') {
-                                        $room_bottlenecks[] = "No lab rooms"; continue;
+                                    // Check subject spread (prevent same subject twice in one day)
+                                    $subject_today = false;
+                                    foreach ($class_slots as $s) {
+                                        if (isset($class_daily_schedule[$class_id][$day_id][$s['slot_id']]) && 
+                                            $class_daily_schedule[$class_id][$day_id][$s['slot_id']] == $subject_id) {
+                                            $subject_today = true; 
+                                            break;
+                                        }
                                     }
-                                    if ($room['capacity'] < $class_strength) {
-                                        $room_bottlenecks[] = "Lab capacity too small"; continue;
-                                    }
-                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) || 
-                                        isset($room_daily_schedule[$room['room_id']][$day_id][$slot2['slot_id']])) {
-                                        $room_bottlenecks[] = "Lab occupied"; continue;
-                                    }
-                                    if (isset($room_blocked[$room['room_id']][$day_id][$slot1['slot_id']]) || 
-                                        isset($room_blocked[$room['room_id']][$day_id][$slot2['slot_id']])) {
-                                        $room_bottlenecks[] = "Lab unavailable"; continue;
-                                    }
+                                    if ($subject_today) continue;
 
-                                    $rs = 0;
-                                    $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
-                                    if ($prev_building && $prev_building == $room['building_id']) $rs += 15;
-                                    if ($room['has_ac'] || $room['building_ac']) $rs += 5;
-                                    $rs += max(0, 20 - abs($room['capacity'] - $class_strength));
+                                    // Score Rooms
+                                    foreach ($rooms as $room) {
+                                        if ($room['room_type'] === 'lab' || $room['capacity'] < $class_strength) continue;
+                                        if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
 
-                                    if ($rs > $room_score) {
-                                        $room_score = $rs;
-                                        $selected_room = $room;
+                                        $score = 0;
+                                        $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
+                                        if ($prev_building && $prev_building == $room['building_id']) $score += 15;
+                                        if ($room['has_ac'] || $room['building_ac']) $score += 5;
+                                        $score += max(0, 20 - abs($room['capacity'] - $class_strength));
+
+                                        if ($score > $best_score) {
+                                            $best_score = $score; 
+                                            $best_day = $day; 
+                                            $best_slot = $slot; 
+                                            $best_room = $room;
+                                        }
                                     }
-                                }
-                                if (!$selected_room) {
-                                    $bottlenecks = array_merge($bottlenecks, $room_bottlenecks);
-                                    continue;
-                                }
-
-                                $score = $room_score;
-                                $day_count = 0;
-                                foreach ($class_slots as $s) {
-                                    if (isset($class_daily_schedule[$class_id][$day_id][$s['slot_id']])) $day_count++;
-                                }
-                                $score -= $day_count * 3;
-
-                                if ($score > $best_score) {
-                                    $best_score = $score;
-                                    $best_day = $day;
-                                    $best_idx = $i;
-                                    $best_room = $selected_room;
                                 }
                             }
-                        }
 
-                        if ($best_day && $best_idx !== null && $best_room) {
-                            $day_id = $best_day['day_id'];
-                            $slot1 = $class_slots[$best_idx];
-                            $slot2 = $class_slots[$best_idx + 1];
-                            $room_id = $best_room['room_id'];
+                            if ($best_day && $best_slot && $best_room) {
+                                $day_id = $best_day['day_id'];
+                                $slot_id = $best_slot['slot_id'];
+                                $room_id = $best_room['room_id'];
 
-                            foreach ([$slot1, $slot2] as $slot) {
-                                $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)");
-                                $stmt->bind_param("iiiiiiii", $class_id, $day_id, $slot['slot_id'], $room_id, $subject_id, $faculty_id, $assignment_id, $best_score);
+                                $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
+                                $stmt->bind_param("iiiiiiii", $class_id, $day_id, $slot_id, $room_id, $subject_id, $faculty_id, $assignment_id, $best_score);
                                 $stmt->execute();
                                 $stmt->close();
-
-                                $class_daily_schedule[$class_id][$day_id][$slot['slot_id']] = true;
-                                $faculty_daily_schedule[$faculty_id][$day_id][$slot['slot_id']] = true;
-                                $room_daily_schedule[$room_id][$day_id][$slot['slot_id']] = true;
+                                
+                                $class_daily_schedule[$class_id][$day_id][$slot_id] = $subject_id;
+                                $faculty_daily_schedule[$faculty_id][$day_id][$slot_id] = true;
+                                $room_daily_schedule[$room_id][$day_id][$slot_id] = true;
                                 $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id] ?? 0) + 1;
                                 $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id] ?? 0) + 1;
+                                $class_room_tracking[$class_id][$day_id] = $best_room['building_id'];
+                                $lectures_placed++;
+                            } else {
+                                $errors[] = "Failed to place Lecture: {$assignment['subject_name']} for {$assignment['class_name']}";
+                                break;
                             }
-                            $class_room_tracking[$class_id][$day_id] = $best_room['building_id'];
-                            $labs_placed += 2;
-                        } else {
-                            $unique_bottlenecks = array_unique($bottlenecks);
-                            $errors[] = "Lab placement failed for {$assignment['subject_name']} ({$assignment['class_name']}). Bottlenecks: " . implode(", ", array_slice($unique_bottlenecks, 0, 3));
-                            $success = false;
-                            break;
                         }
                     }
                 }
-            }
 
-            if ($success && empty($errors)) {
                 $conn->commit();
-                $message = "AI-optimized timetable generated successfully! Energy-aware room allocation applied.";
-                $message_type = "success";
-                audit_log($conn, 'GENERATE_SUCCESS', "Timetable generated with " . count($assignment_list) . " assignments");
-            } else {
-                $conn->rollback();
-                $message = "Generation failed due to hard constraints. Please review bottlenecks below.";
-                if (!empty($errors)) { 
+                
+                $count = db_get_row($conn, "SELECT COUNT(*) as cnt FROM timetable")['cnt'] ?? 0;
+                
+                if (empty($errors)) {
+                    $message = "AI-optimized timetable generated successfully! <strong>$count</strong> sessions scheduled.";
+                    $message_type = "success";
+                    audit_log($conn, 'GENERATE_SUCCESS', "Timetable generated with $count sessions");
+                } else {
+                    $message = "Generation completed with some errors. Scheduled: <strong>$count</strong> sessions.";
                     $message .= "<ul style='margin-top:10px; padding-left:20px; font-size:12px;'><li>" . implode("</li><li>", array_slice($errors, 0, 8)) . "</li></ul>"; 
+                    $message_type = "warning";
+                    audit_log($conn, 'GENERATE_PARTIAL', implode("; ", array_slice($errors, 0, 5)));
                 }
+            } catch (Exception $e) {
+                $conn->rollback();
+                $message = "Error during generation: " . $e->getMessage();
                 $message_type = "error";
-                audit_log($conn, 'GENERATE_FAIL', implode("; ", array_slice($errors, 0, 5)));
+                audit_log($conn, 'GENERATE_ERROR', $e->getMessage());
             }
-        } catch (Exception $e) {
-            $conn->rollback();
-            $message = "Error during generation: " . $e->getMessage();
-            $message_type = "error";
-            audit_log($conn, 'GENERATE_ERROR', $e->getMessage());
         }
     }
 }
 
 $timetable_count = db_get_row($conn, "SELECT COUNT(*) as count FROM timetable")['count'] ?? 0;
 $avg_energy = db_get_row($conn, "SELECT AVG(energy_score) as avg FROM timetable")['avg'] ?? 0;
+$timetable_exists = $timetable_count > 0;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -360,6 +259,40 @@ $avg_energy = db_get_row($conn, "SELECT AVG(energy_score) as avg FROM timetable"
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generate Timetable - AI Smart Timetable</title>
     <?php common_styles(); ?>
+    <style>
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-badge.active { background: #27ae60; color: white; }
+        .status-badge.ready { background: #3498db; color: white; }
+        .status-badge.warning { background: #f39c12; color: white; }
+        .status-badge.error { background: #e74c3c; color: white; }
+        
+        .view-buttons { 
+            display: flex; 
+            gap: 12px; 
+            flex-wrap: wrap; 
+            justify-content: center;
+            margin-top: 15px;
+        }
+        .view-buttons .btn {
+            padding: 8px 20px;
+            font-size: 13px;
+        }
+        .view-buttons .btn-purple {
+            background: #6B1B5E;
+        }
+        .view-buttons .btn-purple:hover {
+            background: #5a1850;
+        }
+        .view-buttons .btn-outline {
+            background: transparent;
+            border: 2px solid #6B1B5E;
+            color: #6B1B5E;
+        }
+        .view-buttons .btn-outline:hover {
+            background: #6B1B5E;
+            color: white;
+        }
+    </style>
 </head>
 <body>
     <?php svg_defs(); ?>
@@ -373,24 +306,56 @@ $avg_energy = db_get_row($conn, "SELECT AVG(energy_score) as avg FROM timetable"
             <div class="alert alert-<?php echo $message_type; ?>"><?php echo $message; ?></div>
         <?php endif; ?>
 
+        <?php if($timetable_exists): ?>
+            <div class="alert alert-info">
+                <strong>Current Status:</strong> <?php echo $timetable_count; ?> sessions already scheduled.
+                <span style="display:block;font-size:12px;margin-top:5px;color:#888;">Average energy optimization score: <?php echo round($avg_energy, 1); ?></span>
+            </div>
+        <?php endif; ?>
+
         <div class="content-box">
             <div class="content-box-header">Configuration Summary</div>
             <div class="content-box-body">
                 <div class="stats-grid">
-                    <div class="stat-card"><div class="number"><?php echo count($class_list); ?></div><div class="label">Classes</div></div>
-                    <div class="stat-card"><div class="number"><?php echo count($assignment_list); ?></div><div class="label">Assignments</div></div>
-                    <div class="stat-card"><div class="number"><?php echo count($days); ?></div><div class="label">Working Days</div></div>
-                    <div class="stat-card"><div class="number"><?php echo count($class_slots); ?></div><div class="label">Slots/Day</div></div>
-                    <div class="stat-card"><div class="number"><?php echo count($rooms); ?></div><div class="label">Rooms</div></div>
-                    <div class="stat-card"><div class="number"><?php echo $total_slots_per_week; ?></div><div class="label">Total Slots/Week</div></div>
-                    <div class="stat-card"><div class="number"><?php echo $total_required_slots; ?></div><div class="label">Required Slots</div></div>
-                </div>
-
-                <?php if ($total_required_slots > $total_slots_per_week * count($class_list)): ?>
-                    <div class="alert alert-error">
-                        <strong>Constraint Issue:</strong> You need <?php echo $total_required_slots; ?> slots but only have <?php echo $total_slots_per_week * count($class_list); ?> available.
+                    <div class="stat-card">
+                        <div class="number"><?php echo count($classes); ?></div>
+                        <div class="label">Active Classes</div>
+                        <?php if(count($classes) > 0): ?>
+                            <div class="label" style="font-size:10px;color:#27ae60;margin-top:4px;"><?php echo implode(', ', array_column($classes, 'class_name')); ?></div>
+                        <?php endif; ?>
                     </div>
-                <?php endif; ?>
+                    <div class="stat-card">
+                        <div class="number"><?php echo count($assignments); ?></div>
+                        <div class="label">Subject Assignments</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number"><?php echo count($days); ?></div>
+                        <div class="label">Working Days</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number"><?php echo count($class_slots); ?></div>
+                        <div class="label">Slots Per Day</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number"><?php echo count($rooms); ?></div>
+                        <div class="label">Available Rooms</div>
+                        <?php if(count($rooms) > 0): ?>
+                            <div class="label" style="font-size:10px;color:#888;margin-top:4px;">
+                                <?php echo count(array_filter($rooms, function($r) { return $r['room_type'] === 'classroom'; })); ?> classrooms, 
+                                <?php echo count(array_filter($rooms, function($r) { return $r['room_type'] === 'lab'; })); ?> labs
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number"><?php echo $total_required_slots; ?></div>
+                        <div class="label">Required Slots</div>
+                        <?php if($total_required_slots > 0): ?>
+                            <div class="label" style="font-size:10px;color:#888;margin-top:4px;">
+                                Available: <?php echo count($days) * count($class_slots) * count($classes); ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -405,8 +370,7 @@ $avg_energy = db_get_row($conn, "SELECT AVG(energy_score) as avg FROM timetable"
                     <li style="padding:6px 0;border-bottom:1px solid #ecf0f1;"><span style="color:#27ae60;margin-right:8px;">&#10003;</span> Faculty daily/weekly hour limits enforced</li>
                     <li style="padding:6px 0;border-bottom:1px solid #ecf0f1;"><span style="color:#27ae60;margin-right:8px;">&#10003;</span> Lab sessions require 2 consecutive slots</li>
                     <li style="padding:6px 0;border-bottom:1px solid #ecf0f1;"><span style="color:#27ae60;margin-right:8px;">&#10003;</span> Room capacity must fit class strength</li>
-                    <li style="padding:6px 0;border-bottom:1px solid #ecf0f1;"><span style="color:#27ae60;margin-right:8px;">&#10003;</span> Energy-aware: prefers same building for consecutive slots</li>
-                    <li style="padding:6px 0;"><span style="color:#27ae60;margin-right:8px;">&#10003;</span> Subject type (lecture/lab/both) strictly respected</li>
+                    <li style="padding:6px 0;"><span style="color:#27ae60;margin-right:8px;">&#10003;</span> Energy-aware: prefers same building for consecutive slots</li>
                 </ul>
             </div>
         </div>
@@ -414,36 +378,64 @@ $avg_energy = db_get_row($conn, "SELECT AVG(energy_score) as avg FROM timetable"
         <div class="content-box">
             <div class="content-box-header">Generate AI-Optimized Timetable</div>
             <div class="content-box-body" style="text-align: center;">
-                <p style="margin-bottom: 20px; color: #666; font-size: 13px;">
-                    <?php if ($timetable_count > 0): ?>
-                        A timetable already exists with <?php echo $timetable_count; ?> entries. Generating again will overwrite it.
-                        <br><span style="color:#888;">Average energy optimization score: <?php echo round($avg_energy, 1); ?></span>
+                <?php if($can_generate): ?>
+                    <?php if($total_required_slots > count($days) * count($class_slots) * count($classes)): ?>
+                        <div class="alert alert-error" style="text-align:left;">
+                            <strong>Capacity Issue:</strong> Required <?php echo $total_required_slots; ?> slots but only 
+                            <?php echo count($days) * count($class_slots) * count($classes); ?> available.
+                        </div>
                     <?php else: ?>
-                        Click the button below to run the AI scheduling engine with conflict detection and energy-aware room allocation.
+                        <p style="margin-bottom: 15px; color: #27ae60; font-size: 14px;">
+                            <span style="font-size:24px;">✓</span> System is ready to generate an AI-optimized timetable.
+                        </p>
+                        <p style="margin-bottom: 20px; color: #666; font-size: 13px;">
+                            This will schedule <strong><?php echo $total_required_slots; ?></strong> sessions across 
+                            <strong><?php echo count($classes); ?></strong> classes using <strong><?php echo count($rooms); ?></strong> rooms.
+                        </p>
+                        <form method="POST" onsubmit="return confirm('This will delete the existing timetable and generate a new one. Continue?');">
+                            <?php csrf_field(); ?>
+                            <button type="submit" name="generate" value="1" class="btn btn-success" style="padding:12px 40px;font-size:16px;">
+                                <svg><use href="#icon-refresh"/></svg> Generate AI Timetable Now
+                            </button>
+                        </form>
                     <?php endif; ?>
-                </p>
-                <form method="POST">
-                    <?php csrf_field(); ?>
-                    <button type="submit" name="generate" value="1" class="btn btn-success" <?php echo (!$can_generate || $total_required_slots > $total_slots_per_week * count($class_list)) ? 'disabled' : ''; ?>>
-                        <svg><use href="#icon-refresh"/></svg> Generate AI Timetable Now
-                    </button>
-                </form>
-                <?php if (!$can_generate): ?>
-                    <p style="margin-top: 15px; color: #e74c3c; font-size: 13px;">Please complete setup first (classes, assignments, and rooms required).</p>
+                <?php else: ?>
+                    <div class="alert alert-error" style="text-align:left;">
+                        <strong>Cannot Generate:</strong> Missing required data.
+                        <ul style="margin-top:8px;padding-left:20px;font-size:13px;">
+                            <?php if(count($classes) == 0): ?><li>No active classes found</li><?php endif; ?>
+                            <?php if(count($assignments) == 0): ?><li>No subject assignments found</li><?php endif; ?>
+                            <?php if(count($days) == 0): ?><li>No working days configured</li><?php endif; ?>
+                            <?php if(count($class_slots) == 0): ?><li>No class time slots configured</li><?php endif; ?>
+                            <?php if(count($rooms) == 0): ?><li>No rooms available</li><?php endif; ?>
+                        </ul>
+                    </div>
+                    <a href="setup.php" class="btn">Go to Setup</a>
+                <?php endif; ?>
+                
+                <?php if($timetable_exists && $can_generate): ?>
+                    <div class="view-buttons">
+                        <a href="view.php" class="btn btn-purple">
+                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                            View Full Timetable
+                        </a>
+                        <a href="view.php?mode=faculty" class="btn btn-outline">
+                            View by Faculty
+                        </a>
+                        <a href="view.php?mode=room" class="btn btn-outline">
+                            View by Room
+                        </a>
+                    </div>
+                <?php endif; ?>
+                
+                <?php if(!$timetable_exists && $can_generate): ?>
+                    <div style="margin-top:20px;padding-top:20px;border-top:1px solid #eee;color:#888;font-size:13px;">
+                        <svg width="16" height="16" fill="#888" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        Generate a timetable first, then view it here.
+                    </div>
                 <?php endif; ?>
             </div>
         </div>
-
-        <?php if ($timetable_count > 0): ?>
-        <div class="content-box">
-            <div class="content-box-header">Generated Timetable Preview</div>
-            <div class="content-box-body">
-                <a href="view.php" class="btn">View Full Timetable &rarr;</a>
-                <a href="view.php?mode=faculty" class="btn">View by Faculty</a>
-                <a href="view.php?mode=room" class="btn">View by Room</a>
-            </div>
-        </div>
-        <?php endif; ?>
     </div>
 </body>
 </html>

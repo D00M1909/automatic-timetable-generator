@@ -1,6 +1,12 @@
 <?php
 require_once 'config.php';
 
+// Auto-patch database for skip_generation if it doesn't exist
+$check = $conn->query("SHOW COLUMNS FROM classes LIKE 'skip_generation'");
+if ($check && $check->num_rows == 0) {
+    $conn->query("ALTER TABLE classes ADD COLUMN skip_generation TINYINT(1) DEFAULT 0");
+}
+
 // ============================
 // HANDLE ALL POST ACTIONS
 // ============================
@@ -38,7 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = $_POST['class_name'] ?? '';
         $code = $_POST['class_code'] ?? '';
         $strength = intval($_POST['strength'] ?? 0);
-        db_insert($conn, "INSERT INTO classes (year_id, class_name, class_code, strength) VALUES (?, ?, ?, ?)", "issi", [$year_id, $name, $code, $strength]);
+        $skip = isset($_POST['skip_generation']) ? 1 : 0;
+        db_insert($conn, "INSERT INTO classes (year_id, class_name, class_code, strength, skip_generation) VALUES (?, ?, ?, ?, ?)", "issii", [$year_id, $name, $code, $strength, $skip]);
         audit_log($conn, 'ADD_CLASS', "Added class: $name");
         set_flash('success', 'Class added successfully!');
         header("Location: setup.php"); exit;
@@ -49,7 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = $_POST['class_name'] ?? '';
         $code = $_POST['class_code'] ?? '';
         $strength = intval($_POST['strength'] ?? 0);
-        db_execute($conn, "UPDATE classes SET year_id=?, class_name=?, class_code=?, strength=? WHERE class_id=?", "issii", [$year_id, $name, $code, $strength, $id]);
+        $skip = isset($_POST['skip_generation']) ? 1 : 0;
+        db_execute($conn, "UPDATE classes SET year_id=?, class_name=?, class_code=?, strength=?, skip_generation=? WHERE class_id=?", "issiii", [$year_id, $name, $code, $strength, $skip, $id]);
         audit_log($conn, 'EDIT_CLASS', "Updated class ID: $id");
         set_flash('success', 'Class updated successfully!');
         header("Location: setup.php"); exit;
@@ -298,7 +306,6 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
         .section-header .toggle-icon svg { width: 16px; height: 16px; fill: white; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .section-header.collapsed .toggle-icon svg { transform: rotate(-90deg); }
         
-        /* Updated Smooth Transitions */
         .section-body { padding: 24px; display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.4s ease-in-out, padding 0.4s ease-in-out; }
         .section-body > div.inner-wrapper { overflow: hidden; }
         .section-body.collapsed { grid-template-rows: 0fr; padding: 0 24px; }
@@ -487,6 +494,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <div class="form-group"><label>Class Name</label><input type="text" name="class_name" required placeholder="e.g., Class A"></div>
                             <div class="form-group"><label>Class Code</label><input type="text" name="class_code" required placeholder="e.g., FY-A"></div>
                             <div class="form-group"><label>Student Strength</label><input type="number" name="strength" value="0" min="0"></div>
+                            <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_add"><label for="skip_gen_add" style="color: #e74c3c;">Skip AI Generation (Keep Data)</label></div></div>
                         </div>
                         <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
                             <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add Class
@@ -494,7 +502,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Class</th><th>Code</th><th>Year</th><th>Strength</th><th class="text-right">Actions</th></tr>
+                            <tr><th>ID</th><th>Class</th><th>Code</th><th>Year</th><th>Strength</th><th>Skip Gen</th><th class="text-right">Actions</th></tr>
                             <?php foreach($classes as $row): ?>
                             <tr>
                                 <td><?php echo $row['class_id']; ?></td>
@@ -502,6 +510,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                 <td><?php echo htmlspecialchars($row['class_code']); ?></td>
                                 <td><?php echo htmlspecialchars($row['year_name']); ?></td>
                                 <td><?php echo $row['strength']; ?></td>
+                                <td><span class="badge <?php echo $row['skip_generation'] ? 'badge-red' : 'badge-green'; ?>"><?php echo $row['skip_generation'] ? 'Skipped' : 'Active'; ?></span></td>
                                 <td class="text-right">
                                     <button type="button" class="action-btn edit" onclick="toggleEdit('class-edit-<?php echo $row['class_id']; ?>')">
                                         <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Edit
@@ -514,7 +523,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                     </form>
                                 </td>
                             </tr>
-                            <tr><td colspan="6" style="padding:0;">
+                            <tr><td colspan="7" style="padding:0;">
                                 <div id="class-edit-<?php echo $row['class_id']; ?>" class="edit-form">
                                     <div class="form-section-title">Edit Class</div>
                                     <form method="POST" class="track-form">
@@ -526,6 +535,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                             <div class="form-group"><label>Class Name</label><input type="text" name="class_name" value="<?php echo htmlspecialchars($row['class_name']); ?>" required></div>
                                             <div class="form-group"><label>Class Code</label><input type="text" name="class_code" value="<?php echo htmlspecialchars($row['class_code']); ?>" required></div>
                                             <div class="form-group"><label>Student Strength</label><input type="number" name="strength" value="<?php echo $row['strength']; ?>" min="0"></div>
+                                            <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_<?php echo $row['class_id']; ?>" <?php echo $row['skip_generation'] ? 'checked' : ''; ?>><label for="skip_gen_<?php echo $row['class_id']; ?>" style="color: #e74c3c;">Skip AI Generation (Keep Data)</label></div></div>
                                         </div>
                                         <button type="submit" class="btn btn-submit" style="background:#3498db;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes</button>
                                     </form>
