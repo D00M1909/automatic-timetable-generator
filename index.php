@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once 'includes/config.php';
 
 // Fetch counts with prepared statements
 $years_count = db_get_row($conn, "SELECT COUNT(*) as count FROM years WHERE year_status='active'")['count'] ?? 0;

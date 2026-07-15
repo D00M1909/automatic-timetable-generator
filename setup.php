@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once 'includes/config.php';
 
 // Auto-patch database for skip_generation if it doesn't exist
 $check = $conn->query("SHOW COLUMNS FROM classes LIKE 'skip_generation'");

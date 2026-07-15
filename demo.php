@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once 'includes/config.php';
 
 // This page generates a beautiful demo timetable with sample data
 // to showcase all AI features without requiring real database entries

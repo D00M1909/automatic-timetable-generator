@@ -1,0 +1,53 @@
+/* Print styles - loaded via media="print" */
+@page {
+    size: landscape;
+    margin: 10mm;
+}
+* {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+}
+.sidebar, .top-header, .breadcrumb, .view-toggle, .filter-bar,
+.btn, .action-grid, .tabs {
+    display: none !important;
+}
+body { background: white !important; }
+.content-wrapper {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: auto !important;
+}
+.content-box {
+    box-shadow: none !important;
+    border: none !important;
+    margin-bottom: 0 !important;
+}
+.content-box-header:not(.print-header) {
+    display: none !important;
+}
+.timetable-container, div[style*="overflow-x"] {
+    overflow: visible !important;
+}
+table {
+    page-break-inside: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}
+tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+}
+td, th {
+    page-break-inside: avoid !important;
+    word-wrap: break-word !important;
+}
+.timetable-grid td {
+    height: auto !important;
+    padding: 6px 4px !important;
+}
+.print-header {
+    display: block !important;
+    text-align: center;
+    margin-bottom: 20px;
+}

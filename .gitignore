@@ -1,5 +1,5 @@
-# Local database config with passwords
-config.php
+# Local database config with passwords (root only — NOT includes/)
+/config.php
 
 # Full database dump (contains real data) — use schema-only file instead
 timetable_db.sql
@@ -11,3 +11,6 @@ Thumbs.db
 # IDE files
 .idea/
 .vscode/
+
+# Browser test artifacts
+.playwright-mcp/
