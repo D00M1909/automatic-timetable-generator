@@ -138,13 +138,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header("Location: setup.php"); exit;
     }
 
+    // =============================================
+    // UPDATED ASSIGNMENT HANDLING with preferred_slot_id
+    // =============================================
     if ($action === 'add_assignment') {
         $class_id = intval($_POST['class_id'] ?? 0);
         $subject_id = intval($_POST['subject_id'] ?? 0);
         $faculty_id = intval($_POST['faculty_id'] ?? 0);
-        db_insert($conn, "INSERT INTO subject_assignments (class_id, subject_id, faculty_id) VALUES (?, ?, ?)", "iii", [$class_id, $subject_id, $faculty_id]);
+        $preferred_slot_id = !empty($_POST['preferred_slot_id']) ? intval($_POST['preferred_slot_id']) : null;
+        
+        if ($preferred_slot_id) {
+            db_insert($conn, "INSERT INTO subject_assignments (class_id, subject_id, faculty_id, preferred_slot_id) VALUES (?, ?, ?, ?)", "iiii", [$class_id, $subject_id, $faculty_id, $preferred_slot_id]);
+        } else {
+            db_insert($conn, "INSERT INTO subject_assignments (class_id, subject_id, faculty_id) VALUES (?, ?, ?)", "iii", [$class_id, $subject_id, $faculty_id]);
+        }
         audit_log($conn, 'ADD_ASSIGNMENT', "Added assignment: class=$class_id, subject=$subject_id, faculty=$faculty_id");
         set_flash('success', 'Assignment added successfully!');
+        header("Location: setup.php"); exit;
+    }
+    if ($action === 'edit_assignment') {
+        $id = intval($_POST['assignment_id'] ?? 0);
+        $class_id = intval($_POST['class_id'] ?? 0);
+        $subject_id = intval($_POST['subject_id'] ?? 0);
+        $faculty_id = intval($_POST['faculty_id'] ?? 0);
+        $preferred_slot_id = !empty($_POST['preferred_slot_id']) ? intval($_POST['preferred_slot_id']) : null;
+        
+        if ($preferred_slot_id) {
+            db_execute($conn, "UPDATE subject_assignments SET class_id=?, subject_id=?, faculty_id=?, preferred_slot_id=? WHERE assignment_id=?", "iiiii", [$class_id, $subject_id, $faculty_id, $preferred_slot_id, $id]);
+        } else {
+            db_execute($conn, "UPDATE subject_assignments SET class_id=?, subject_id=?, faculty_id=?, preferred_slot_id=NULL WHERE assignment_id=?", "iiii", [$class_id, $subject_id, $faculty_id, $id]);
+        }
+        audit_log($conn, 'EDIT_ASSIGNMENT', "Updated assignment ID: $id");
+        set_flash('success', 'Assignment updated successfully!');
         header("Location: setup.php"); exit;
     }
     if ($action === 'delete_assignment') {
@@ -258,7 +283,8 @@ $years = db_get_rows($conn, "SELECT * FROM years ORDER BY year_id DESC");
 $classes = db_get_rows($conn, "SELECT c.*, y.year_name FROM classes c JOIN years y ON c.year_id = y.year_id ORDER BY c.class_id DESC");
 $faculty = db_get_rows($conn, "SELECT * FROM faculty ORDER BY faculty_id DESC");
 $subjects = db_get_rows($conn, "SELECT * FROM subjects ORDER BY subject_id DESC");
-$assignments = db_get_rows($conn, "SELECT sa.*, c.class_name, s.subject_name, f.faculty_name FROM subject_assignments sa JOIN classes c ON sa.class_id = c.class_id JOIN subjects s ON sa.subject_id = s.subject_id JOIN faculty f ON sa.faculty_id = f.faculty_id ORDER BY sa.assignment_id DESC");
+// Updated assignments query to include preferred_slot_id and time slot info
+$assignments = db_get_rows($conn, "SELECT sa.*, c.class_name, s.subject_name, f.faculty_name, ts.start_time, ts.end_time FROM subject_assignments sa JOIN classes c ON sa.class_id = c.class_id JOIN subjects s ON sa.subject_id = s.subject_id JOIN faculty f ON sa.faculty_id = f.faculty_id LEFT JOIN time_slots ts ON sa.preferred_slot_id = ts.slot_id ORDER BY sa.assignment_id DESC");
 $rooms = db_get_rows($conn, "SELECT r.*, b.building_name FROM rooms r JOIN buildings b ON r.building_id = b.building_id ORDER BY r.room_id DESC");
 $buildings = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_id DESC");
 $preferences = db_get_rows($conn, "SELECT fp.*, f.faculty_name, d.day_name, ts.start_time, ts.end_time FROM faculty_preferences fp JOIN faculty f ON fp.faculty_id = f.faculty_id JOIN working_days d ON fp.day_id = d.day_id JOIN time_slots ts ON fp.slot_id = ts.slot_id ORDER BY fp.preference_id DESC");
@@ -314,7 +340,8 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
         .form-group { margin-bottom: 0; }
         .form-group label { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
-        .form-group input, .form-group select, .form-group textarea { border: 1.5px solid #e0e0e0; border-radius: 8px; padding: 10px 12px; font-size: 13px; transition: all 0.2s; background: #fafafa; }
+        .form-group label .optional { font-weight: 400; color: #999; font-size: 10px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; border: 1.5px solid #e0e0e0; border-radius: 8px; padding: 10px 12px; font-size: 13px; transition: all 0.2s; background: #fafafa; }
         .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #6B1B5E; background: white; box-shadow: 0 0 0 3px rgba(107, 27, 94, 0.08); outline: none; }
         .form-group select { cursor: pointer; }
         .btn-submit { margin-top: 8px; padding: 10px 24px; border-radius: 8px; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; border: none; cursor: pointer; color: white; }
@@ -327,7 +354,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
         .checkbox-group label { margin-bottom: 0; cursor: pointer; font-size: 13px; color: #444; }
 
         .data-table { max-height: 320px; overflow-y: auto; border-radius: 8px; border: 1px solid #eee; margin-top: 15px;}
-        .data-table table { font-size: 13px; border-collapse: separate; border-spacing: 0; }
+        .data-table table { width: 100%; font-size: 13px; border-collapse: separate; border-spacing: 0; }
         .data-table th { background: linear-gradient(135deg, #f8f9fa, #f0f2f5); color: #555; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 16px; border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; z-index: 10; }
         .data-table td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
         .data-table tr:hover td { background: #faf8fb; }
@@ -373,6 +400,17 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
         .data-table::-webkit-scrollbar-thumb { background: #c0c0c0; border-radius: 3px; }
         .data-table::-webkit-scrollbar-thumb:hover { background: #a0a0a0; }
 
+        .preferred-slot-badge { 
+            display: inline-block; 
+            padding: 2px 10px; 
+            border-radius: 12px; 
+            font-size: 10px; 
+            font-weight: 600; 
+            background: #e8f5e9; 
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
         @media (max-width: 768px) { .stats-bar { gap: 8px; } .stat-pill { min-width: 120px; padding: 12px 16px; } .section-body { padding: 16px; } .form-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -412,6 +450,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== YEARS SECTION ==================== -->
         <div class="section-card">
             <div class="section-header" onclick="toggleSection('sec-years')">
                 <div class="header-left">
@@ -476,6 +515,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== CLASSES SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-classes')">
                 <div class="header-left">
@@ -548,6 +588,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== FACULTY SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-faculty')">
                 <div class="header-left">
@@ -624,6 +665,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== SUBJECTS SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-subjects')">
                 <div class="header-left">
@@ -698,6 +740,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== ASSIGNMENTS SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-assignments')">
                 <div class="header-left">
@@ -712,24 +755,86 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                         <?php csrf_field(); ?>
                         <input type="hidden" name="action" value="add_assignment">
                         <div class="form-grid">
-                            <div class="form-group"><label>Select Class</label><select name="class_id" required><option value="">-- Select Class --</option><?php foreach($classes_list as $r): ?><option value="<?php echo $r['class_id']; ?>"><?php echo htmlspecialchars($r['class_name']); ?> (<?php echo htmlspecialchars($r['class_code']); ?>)</option><?php endforeach; ?></select></div>
-                            <div class="form-group"><label>Select Subject</label><select name="subject_id" required><option value="">-- Select Subject --</option><?php foreach($subjects_list as $r): ?><option value="<?php echo $r['subject_id']; ?>"><?php echo htmlspecialchars($r['subject_name']); ?> (<?php echo htmlspecialchars($r['subject_code']); ?>)</option><?php endforeach; ?></select></div>
-                            <div class="form-group"><label>Select Faculty</label><select name="faculty_id" required><option value="">-- Select Faculty --</option><?php foreach($faculty_list as $r): ?><option value="<?php echo $r['faculty_id']; ?>"><?php echo htmlspecialchars($r['faculty_name']); ?> (<?php echo htmlspecialchars($r['faculty_code']); ?>)</option><?php endforeach; ?></select></div>
+                            <div class="form-group">
+                                <label>Select Class</label>
+                                <select name="class_id" required>
+                                    <option value="">-- Select Class --</option>
+                                    <?php foreach($classes_list as $r): ?>
+                                        <option value="<?php echo $r['class_id']; ?>"><?php echo htmlspecialchars($r['class_name']); ?> (<?php echo htmlspecialchars($r['class_code']); ?>)</option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Select Subject</label>
+                                <select name="subject_id" required>
+                                    <option value="">-- Select Subject --</option>
+                                    <?php foreach($subjects_list as $r): ?>
+                                        <option value="<?php echo $r['subject_id']; ?>"><?php echo htmlspecialchars($r['subject_name']); ?> (<?php echo htmlspecialchars($r['subject_code']); ?>)</option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Select Faculty</label>
+                                <select name="faculty_id" required>
+                                    <option value="">-- Select Faculty --</option>
+                                    <?php foreach($faculty_list as $r): ?>
+                                        <option value="<?php echo $r['faculty_id']; ?>"><?php echo htmlspecialchars($r['faculty_name']); ?> (<?php echo htmlspecialchars($r['faculty_code']); ?>)</option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Preferred Time Slot <span class="optional">(Optional)</span></label>
+                                <select name="preferred_slot_id">
+                                    <option value="">-- No Preference --</option>
+                                    <?php foreach($time_slots as $s): ?>
+                                        <option value="<?php echo $s['slot_id']; ?>">
+                                            <?php echo date('h:i A', strtotime($s['start_time'])); ?> - <?php echo date('h:i A', strtotime($s['end_time'])); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <small style="color:#888;font-size:11px;display:block;margin-top:4px;">
+                                    <svg width="12" height="12" fill="#888" viewBox="0 0 24 24" style="vertical-align:middle;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                                    Optional: Suggests a preferred time for this class-subject combination
+                                </small>
+                            </div>
                         </div>
                         <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
                             <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add Assignment
                         </button>
                     </form>
+
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Class</th><th>Subject</th><th>Faculty</th><th class="text-right">Actions</th></tr>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Class</th>
+                                    <th>Subject</th>
+                                    <th>Faculty</th>
+                                    <th>Preferred Slot</th>
+                                    <th class="text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
                             <?php foreach($assignments as $row): ?>
                             <tr>
                                 <td><?php echo $row['assignment_id']; ?></td>
                                 <td><?php echo htmlspecialchars($row['class_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['faculty_name']); ?></td>
+                                <td>
+                                    <?php if($row['preferred_slot_id']): ?>
+                                        <span class="preferred-slot-badge">
+                                            <?php echo date('h:i A', strtotime($row['start_time'])); ?> - <?php echo date('h:i A', strtotime($row['end_time'])); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span style="color:#999;font-size:12px;">—</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-right">
+                                    <button type="button" class="action-btn edit" onclick="toggleEdit('assignment-edit-<?php echo $row['assignment_id']; ?>')">
+                                        <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Edit
+                                    </button>
                                     <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this assignment?');" class="track-form">
                                         <?php csrf_field(); ?>
                                         <input type="hidden" name="action" value="delete_assignment">
@@ -738,13 +843,74 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                     </form>
                                 </td>
                             </tr>
+                            <tr><td colspan="6" style="padding:0;">
+                                <div id="assignment-edit-<?php echo $row['assignment_id']; ?>" class="edit-form">
+                                    <div class="form-section-title">Edit Assignment</div>
+                                    <form method="POST" class="track-form">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="action" value="edit_assignment">
+                                        <input type="hidden" name="assignment_id" value="<?php echo $row['assignment_id']; ?>">
+                                        <div class="form-grid">
+                                            <div class="form-group">
+                                                <label>Select Class</label>
+                                                <select name="class_id" required>
+                                                    <?php foreach($classes_list as $r): ?>
+                                                        <option value="<?php echo $r['class_id']; ?>" <?php echo $r['class_id']==$row['class_id']?'selected':''; ?>>
+                                                            <?php echo htmlspecialchars($r['class_name']); ?> (<?php echo htmlspecialchars($r['class_code']); ?>)
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Select Subject</label>
+                                                <select name="subject_id" required>
+                                                    <?php foreach($subjects_list as $r): ?>
+                                                        <option value="<?php echo $r['subject_id']; ?>" <?php echo $r['subject_id']==$row['subject_id']?'selected':''; ?>>
+                                                            <?php echo htmlspecialchars($r['subject_name']); ?> (<?php echo htmlspecialchars($r['subject_code']); ?>)
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Select Faculty</label>
+                                                <select name="faculty_id" required>
+                                                    <?php foreach($faculty_list as $r): ?>
+                                                        <option value="<?php echo $r['faculty_id']; ?>" <?php echo $r['faculty_id']==$row['faculty_id']?'selected':''; ?>>
+                                                            <?php echo htmlspecialchars($r['faculty_name']); ?> (<?php echo htmlspecialchars($r['faculty_code']); ?>)
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Preferred Time Slot <span class="optional">(Optional)</span></label>
+                                                <select name="preferred_slot_id">
+                                                    <option value="">-- No Preference --</option>
+                                                    <?php foreach($time_slots as $s): ?>
+                                                        <option value="<?php echo $s['slot_id']; ?>" <?php echo $s['slot_id']==$row['preferred_slot_id']?'selected':''; ?>>
+                                                            <?php echo date('h:i A', strtotime($s['start_time'])); ?> - <?php echo date('h:i A', strtotime($s['end_time'])); ?>
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                                <small style="color:#888;font-size:11px;display:block;margin-top:4px;">
+                                                    Optional: Suggests a preferred time for this class-subject combination
+                                                </small>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-submit" style="background:#3498db;">
+                                            <svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes
+                                        </button>
+                                    </form>
+                                </div>
+                            </td></tr>
                             <?php endforeach; ?>
+                            </tbody>
                         </table>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- ==================== ROOMS & BUILDINGS SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-rooms')">
                 <div class="header-left">
@@ -879,6 +1045,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== FACULTY PREFERENCES SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-preferences')">
                 <div class="header-left">
@@ -932,6 +1099,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
+        <!-- ==================== FACULTY UNAVAILABLE SLOTS SECTION ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-unavailable')">
                 <div class="header-left">
