@@ -1,6 +1,9 @@
 # Local database config with passwords
 config.php
 
+# Full database dump (contains real data) — use schema-only file instead
+timetable_db.sql
+
 # OS files
 .DS_Store
 Thumbs.db
