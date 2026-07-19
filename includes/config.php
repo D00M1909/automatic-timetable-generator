@@ -183,7 +183,7 @@ function sidebar($active_page = '') {
         ['setup.php', 'icon-settings', 'Manage Data'],
         ['generate.php', 'icon-refresh', 'Generate Timetable'],
         ['view.php', 'icon-eye', 'View Timetable'],
-        ['demo.php', 'icon-demo', 'AI Demo Template'],
+        ['demo.php', 'icon-demo', 'How It Works'],
     ];
     echo '<div class="sidebar">';
     echo '<div class="sidebar-header"><div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#6B1B5E;font-weight:bold;font-size:18px;">A</div><h2>Ajeenkya DY Patil<br><span style="font-size:11px;font-weight:400;opacity:0.8;">University ERP</span></h2></div>';

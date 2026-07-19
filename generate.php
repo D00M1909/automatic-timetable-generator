@@ -6,16 +6,35 @@ $message_type = '';
 
 // Fetch active data for generation
 $classes = db_get_rows($conn, "SELECT * FROM classes WHERE year_id IN (SELECT year_id FROM years WHERE year_status='active') ORDER BY class_name");
+// Sort classes by constraint severity: year_of_study=3 (TY, most constrained) first, then 2 (SY), then 4 (FY)
+usort($classes, function($a, $b) {
+    $order = [3 => 0, 2 => 1, 4 => 2]; // TY first, then SY, then FY
+    $ao = $order[$a['year_of_study']] ?? 3;
+    $bo = $order[$b['year_of_study']] ?? 3;
+    return $ao - $bo;
+});
 $working_days = db_get_rows($conn, "SELECT * FROM working_days WHERE is_working=1 ORDER BY day_order");
 $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORDER BY slot_number");
-$assignments = db_get_rows($conn, "SELECT sa.*, s.subject_name, s.subject_type, s.lecture_hours_per_week, s.lab_hours_per_week, f.faculty_name, f.max_hours_per_day, f.max_hours_per_week, c.class_name, c.strength FROM subject_assignments sa JOIN subjects s ON sa.subject_id = s.subject_id JOIN faculty f ON sa.faculty_id = f.faculty_id JOIN classes c ON sa.class_id = c.class_id ORDER BY sa.class_id, sa.subject_id");
-$rooms = db_get_rows($conn, "SELECT r.*, b.building_name, b.has_ac as building_ac FROM rooms r JOIN buildings b ON r.building_id = b.building_id WHERE r.room_type IN ('classroom','lab','seminar') ORDER BY r.capacity");
-$faculty_unavailable = db_get_rows($conn, "SELECT * FROM faculty_unavailable");
-$room_unavailable = db_get_rows($conn, "SELECT * FROM room_unavailable");
-$faculty_preferences = db_get_rows($conn, "SELECT * FROM faculty_preferences");
+	$assignments = db_get_rows($conn, "SELECT sa.*, s.subject_name, s.subject_type, s.lecture_hours_per_week, s.lab_hours_per_week, s.is_minor, f.faculty_name, f.max_hours_per_day, f.max_hours_per_week, c.class_name, c.strength, c.year_of_study FROM subject_assignments sa JOIN subjects s ON sa.subject_id = s.subject_id JOIN faculty f ON sa.faculty_id = f.faculty_id JOIN classes c ON sa.class_id = c.class_id ORDER BY sa.class_id, sa.subject_id");
+	$rooms = db_get_rows($conn, "SELECT r.*, b.building_name, b.has_ac as building_ac FROM rooms r JOIN buildings b ON r.building_id = b.building_id WHERE r.room_type IN ('classroom','lab','seminar') ORDER BY r.capacity");
+	$faculty_unavailable = db_get_rows($conn, "SELECT * FROM faculty_unavailable");
+	$room_unavailable = db_get_rows($conn, "SELECT * FROM room_unavailable");
+	$faculty_preferences = db_get_rows($conn, "SELECT * FROM faculty_preferences");
+	$year_working_days = db_get_rows($conn, "SELECT * FROM year_working_days");
 
-$days = $working_days;
-$class_slots = array_values(array_filter($time_slots, function($s) { return $s['slot_type'] === 'class'; }));
+	$days = $working_days;
+	$class_slots = array_values(array_filter($time_slots, function($s) { return $s['slot_type'] === 'class'; }));
+
+	// Build lookup: year_of_study → [day_ids] where last-slot = minor constraint applies
+	$year_minor_days = [];
+	foreach ($year_working_days as $ywd) {
+	    $year_minor_days[$ywd['year_of_study']][] = $ywd['day_id'];
+	}
+	// Find the last class slot number (for minor subject last-slot constraint)
+	$last_slot_number = 0;
+	foreach ($class_slots as $s) {
+	    if ($s['slot_number'] > $last_slot_number) $last_slot_number = $s['slot_number'];
+	}
 
 $can_generate = count($classes) > 0 && count($assignments) > 0 && count($days) > 0 && count($class_slots) > 0 && count($rooms) > 0;
 $total_required_slots = 0;
@@ -64,13 +83,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                     $faculty_pref_lookup[$fp['faculty_id']][$fp['day_id']][$fp['slot_id']] = $fp['preference_level'];
                 }
 
-                // Sort assignments: Labs first, then largest hour loads
-                usort($assignments, function($a, $b) {
-                    if ($a['lab_hours_per_week'] != $b['lab_hours_per_week']) 
-                        return $b['lab_hours_per_week'] - $a['lab_hours_per_week'];
-                    return ($b['lecture_hours_per_week'] + $b['lab_hours_per_week']) - 
-                           ($a['lecture_hours_per_week'] + $a['lab_hours_per_week']);
-                });
+	                // Sort assignments: Minor subjects first (to grab last slots), then labs, then largest hour loads
+	                usort($assignments, function($a, $b) {
+	                    if ($a['is_minor'] != $b['is_minor'])
+	                        return $b['is_minor'] - $a['is_minor']; // Minor first
+	                    if ($a['lab_hours_per_week'] != $b['lab_hours_per_week'])
+	                        return $b['lab_hours_per_week'] - $a['lab_hours_per_week'];
+	                    return ($b['lecture_hours_per_week'] + $b['lab_hours_per_week']) -
+	                           ($a['lecture_hours_per_week'] + $a['lab_hours_per_week']);
+	                });
 
                 foreach ($classes as $class) {
                     $class_id = $class['class_id'];
@@ -115,12 +136,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                     if (($f_day_hrs + 2) > $assignment['max_hours_per_day'] || 
                                         ($f_week_hrs + 2) > $assignment['max_hours_per_week']) continue;
 
-                                    // Check Faculty Preferences - Skip "avoid" slots
-                                    $pref1 = $faculty_pref_lookup[$faculty_id][$day_id][$slot1['slot_id']] ?? 'neutral';
-                                    $pref2 = $faculty_pref_lookup[$faculty_id][$day_id][$slot2['slot_id']] ?? 'neutral';
-                                    if ($pref1 === 'avoid' || $pref2 === 'avoid') continue;
+	                                    // Check Faculty Preferences - Skip "avoid" slots
+	                                    $pref1 = $faculty_pref_lookup[$faculty_id][$day_id][$slot1['slot_id']] ?? 'neutral';
+	                                    $pref2 = $faculty_pref_lookup[$faculty_id][$day_id][$slot2['slot_id']] ?? 'neutral';
+	                                    if ($pref1 === 'avoid' || $pref2 === 'avoid') continue;
 
-                                    // Score Rooms (only lab rooms)
+	                                    // Minor Subject Last-Slot Constraint (for labs spanning the last slot)
+	                                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
+	                                    if (in_array($day_id, $minor_days)) {
+	                                        if ($slot1['slot_number'] == $last_slot_number || $slot2['slot_number'] == $last_slot_number) {
+	                                            if (!$assignment['is_minor']) continue; // Hard block
+	                                            $score += 200;
+	                                        }
+	                                    }
+
+	                                    // Score Rooms (only lab rooms)
                                     foreach ($rooms as $room) {
                                         if ($room['room_type'] !== 'lab' || $room['capacity'] < $class_strength) continue;
                                         if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) || 
@@ -214,11 +244,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                     }
                                     if ($subject_today) continue;
 
-                                    // Check Faculty Preferences - Skip "avoid" slots
-                                    $pref = $faculty_pref_lookup[$faculty_id][$day_id][$slot_id] ?? 'neutral';
-                                    if ($pref === 'avoid') continue;
+	                                    // Check Faculty Preferences - Skip "avoid" slots
+	                                    $pref = $faculty_pref_lookup[$faculty_id][$day_id][$slot_id] ?? 'neutral';
+	                                    if ($pref === 'avoid') continue;
 
-                                    // Score Rooms (only classrooms for lectures)
+	                                    // Minor Subject Last-Slot Constraint — HARD BLOCK
+	                                    // Minor subjects MUST go in the last slot on designated days
+	                                    $is_last_slot = ($slot['slot_number'] == $last_slot_number);
+	                                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
+	                                    if ($is_last_slot && in_array($day_id, $minor_days)) {
+	                                        if (!$assignment['is_minor']) continue; // Hard block
+	                                        $score += 200; // Strong bonus for correct minor placement
+	                                    }
+
+	                                    // Score Rooms (only classrooms for lectures)
                                     foreach ($rooms as $room) {
                                         if ($room['room_type'] === 'lab' || $room['capacity'] < $class_strength) continue;
                                         if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
@@ -237,12 +276,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                             $score += 100; // Major bonus for preferred slot
                                         }
                                         
-                                        // Bonus for faculty "preferred" slots
-                                        if ($pref === 'preferred') {
-                                            $score += 30;
-                                        }
+	                                        // Bonus for faculty "preferred" slots
+	                                        if ($pref === 'preferred') {
+	                                            $score += 30;
+	                                        }
 
-                                        if ($score > $best_score) {
+	                                        if ($score > $best_score) {
                                             $best_score = $score; 
                                             $best_day = $day; 
                                             $best_slot = $slot; 
@@ -562,7 +601,7 @@ $assignments_with_preferred = count(array_filter($assignments, function($a) { re
                             <?php if($assignments_with_preferred > 0): ?>
                             <div style="margin-bottom:15px;font-size:13px;color:#666;background:#e8f5e9;padding:10px 20px;border-radius:8px;display:inline-block;">
                                 <svg width="16" height="16" fill="#2e7d32" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                                <strong><?php echo $assignments_with_preferred; ?></strong> assignments have preferred time slots set. The AI will prioritize these slots.
+                                <strong><?php echo $assignments_with_preferred; ?></strong> assignments have preferred time slots set. The engine will prioritize these slots.
                             </div>
                             <?php endif; ?>
 

@@ -21,7 +21,7 @@ $ready = $years_count > 0 && $classes_count > 0 && $faculty_count > 0 && $subjec
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - AI Smart Timetable</title>
+    <title>Dashboard - Smart Timetable</title>
     <?php common_styles(); ?>
     <style>
         .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
@@ -56,14 +56,14 @@ $ready = $years_count > 0 && $classes_count > 0 && $faculty_count > 0 && $subjec
 
         <div class="ai-banner">
             <div>
-                <h2><svg width="24" height="24" fill="white" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:8px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg> AI-Powered Smart Timetable Generator</h2>
+                <h2><svg width="24" height="24" fill="white" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:8px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg> Smart Timetable Generator</h2>
                 <p>Conflict-free scheduling with energy-aware room allocation, faculty preference learning, and predictive analytics.</p>
             </div>
-            <a href="demo.php" class="btn"><svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg> View AI Demo</a>
+            <a href="demo.php" class="btn"><svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg> How It Works</a>
         </div>
 
         <?php if($ready): ?>
-            <div class="alert alert-success">System is ready to generate AI-optimized timetable.</div>
+            <div class="alert alert-success">System is ready to generate the timetable.</div>
         <?php else: ?>
             <div class="alert alert-warning">Incomplete setup. Please configure all required data before generating.</div>
         <?php endif; ?>
@@ -118,7 +118,7 @@ $ready = $years_count > 0 && $classes_count > 0 && $faculty_count > 0 && $subjec
                 <div class="change <?php echo $room_utilization > 80 ? 'negative' : ''; ?>"><?php echo $room_utilization > 80 ? 'High load' : 'Optimal'; ?></div>
             </div>
             <div class="analytics-card">
-                <div class="title">AI Engine</div>
+                <div class="title">Scheduling Engine</div>
                 <div class="value" style="color: #27ae60;">Active</div>
                 <div class="change">OR-Tools + Heuristics</div>
             </div>
@@ -136,7 +136,7 @@ $ready = $years_count > 0 && $classes_count > 0 && $faculty_count > 0 && $subjec
                     <div class="action-card" onclick="window.location.href='generate.php'">
                         <svg><use href="#icon-refresh"/></svg>
                         <h4>Generate Timetable</h4>
-                        <p>Run the AI scheduling engine with conflict detection</p>
+                        <p>Run the scheduling engine with conflict detection</p>
                     </div>
                     <div class="action-card" onclick="window.location.href='view.php'">
                         <svg><use href="#icon-eye"/></svg>
@@ -145,18 +145,18 @@ $ready = $years_count > 0 && $classes_count > 0 && $faculty_count > 0 && $subjec
                     </div>
                     <div class="action-card" onclick="window.location.href='demo.php'" style="border-color: #9c27b0; background: #faf5ff;">
                         <svg style="fill: #9c27b0;"><use href="#icon-demo"/></svg>
-                        <h4>AI Demo Template</h4>
-                        <p>Showcase all AI features with a sample timetable</p>
+                        <h4>How It Works</h4>
+                        <p>Understand the scheduling engine and its constraint-solving approach</p>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="content-box">
-            <div class="content-box-header">System Status & AI Features</div>
+            <div class="content-box-header">System Status & Features</div>
             <div class="content-box-body">
                 <?php if($ready): ?>
-                    <p style="color: #27ae60; font-weight: 600;">Ready to generate AI-optimized timetable. All required data is configured.</p>
+                    <p style="color: #27ae60; font-weight: 600;">Ready to generate timetable. All required data is configured.</p>
                     <br><a href="generate.php" class="btn btn-success"><svg><use href="#icon-refresh"/></svg> Generate Timetable Now</a>
                 <?php else: ?>
                     <p style="color: #e67e22; font-weight: 600;">Please configure all required data before generating.</p>
@@ -165,13 +165,13 @@ $ready = $years_count > 0 && $classes_count > 0 && $faculty_count > 0 && $subjec
 
                 <div class="feature-grid" style="margin-top: 25px;">
                     <div class="feature-card">
-                        <h4><svg><use href="#icon-ai"/></svg> Hybrid AI Scheduling Engine</h4>
+                        <h4><svg><use href="#icon-ai"/></svg> Hybrid Scheduling Engine</h4>
                         <p>Combines Constraint Satisfaction, Genetic Algorithm heuristics, and Google OR-Tools optimization for 100% conflict-free timetables.</p>
                         <div class="status"><span class="badge badge-green">Active</span></div>
                     </div>
                     <div class="feature-card">
                         <h4><svg><use href="#icon-star"/></svg> Faculty Preference Learning</h4>
-                        <p>AI learns preferred teaching hours, historical workload patterns, and automatically balances assignments to maximize satisfaction.</p>
+                        <p>The system learns preferred teaching hours, historical workload patterns, and automatically balances assignments to maximize satisfaction.</p>
                         <div class="status"><span class="badge badge-blue">Learning</span></div>
                     </div>
                     <div class="feature-card">

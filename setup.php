@@ -78,7 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $phone = $_POST['phone'] ?? '';
         $max_day = intval($_POST['max_hours_per_day'] ?? 6);
         $max_week = intval($_POST['max_hours_per_week'] ?? 30);
-        db_insert($conn, "INSERT INTO faculty (faculty_name, faculty_code, department, email, phone, max_hours_per_day, max_hours_per_week) VALUES (?, ?, ?, ?, ?, ?, ?)", "sssssii", [$name, $code, $dept, $email, $phone, $max_day, $max_week]);
+        $assigned = intval($_POST['assigned_hours_per_week'] ?? 0);
+        db_insert($conn, "INSERT INTO faculty (faculty_name, faculty_code, department, email, phone, max_hours_per_day, max_hours_per_week, assigned_hours_per_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", "sssssiii", [$name, $code, $dept, $email, $phone, $max_day, $max_week, $assigned]);
         audit_log($conn, 'ADD_FACULTY', "Added faculty: $name");
         set_flash('success', 'Faculty added successfully!');
         header("Location: setup.php"); exit;
@@ -92,7 +93,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $phone = $_POST['phone'] ?? '';
         $max_day = intval($_POST['max_hours_per_day'] ?? 6);
         $max_week = intval($_POST['max_hours_per_week'] ?? 30);
-        db_execute($conn, "UPDATE faculty SET faculty_name=?, faculty_code=?, department=?, email=?, phone=?, max_hours_per_day=?, max_hours_per_week=? WHERE faculty_id=?", "sssssiii", [$name, $code, $dept, $email, $phone, $max_day, $max_week, $id]);
+        $assigned = intval($_POST['assigned_hours_per_week'] ?? 0);
+        db_execute($conn, "UPDATE faculty SET faculty_name=?, faculty_code=?, department=?, email=?, phone=?, max_hours_per_day=?, max_hours_per_week=?, assigned_hours_per_week=? WHERE faculty_id=?", "sssssiiii", [$name, $code, $dept, $email, $phone, $max_day, $max_week, $assigned, $id]);
         audit_log($conn, 'EDIT_FACULTY', "Updated faculty ID: $id");
         set_flash('success', 'Faculty updated successfully!');
         header("Location: setup.php"); exit;
@@ -112,7 +114,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lec = intval($_POST['lecture_hours_per_week'] ?? 0);
         $lab = intval($_POST['lab_hours_per_week'] ?? 0);
         $dept = $_POST['department'] ?? '';
-        db_insert($conn, "INSERT INTO subjects (subject_name, subject_code, subject_type, lecture_hours_per_week, lab_hours_per_week, department) VALUES (?, ?, ?, ?, ?, ?)", "sssiss", [$name, $code, $type, $lec, $lab, $dept]);
+        $minor = isset($_POST['is_minor']) ? 1 : 0;
+        db_insert($conn, "INSERT INTO subjects (subject_name, subject_code, subject_type, lecture_hours_per_week, lab_hours_per_week, department, is_minor) VALUES (?, ?, ?, ?, ?, ?, ?)", "sssissi", [$name, $code, $type, $lec, $lab, $dept, $minor]);
         audit_log($conn, 'ADD_SUBJECT', "Added subject: $name");
         set_flash('success', 'Subject added successfully!');
         header("Location: setup.php"); exit;
@@ -125,7 +128,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lec = intval($_POST['lecture_hours_per_week'] ?? 0);
         $lab = intval($_POST['lab_hours_per_week'] ?? 0);
         $dept = $_POST['department'] ?? '';
-        db_execute($conn, "UPDATE subjects SET subject_name=?, subject_code=?, subject_type=?, lecture_hours_per_week=?, lab_hours_per_week=?, department=? WHERE subject_id=?", "sssissi", [$name, $code, $type, $lec, $lab, $dept, $id]);
+        $minor = isset($_POST['is_minor']) ? 1 : 0;
+        db_execute($conn, "UPDATE subjects SET subject_name=?, subject_code=?, subject_type=?, lecture_hours_per_week=?, lab_hours_per_week=?, department=?, is_minor=? WHERE subject_id=?", "sssissii", [$name, $code, $type, $lec, $lab, $dept, $minor, $id]);
         audit_log($conn, 'EDIT_SUBJECT', "Updated subject ID: $id");
         set_flash('success', 'Subject updated successfully!');
         header("Location: setup.php"); exit;
@@ -274,7 +278,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = intval($_POST['unavailable_id'] ?? 0);
         db_execute($conn, "DELETE FROM faculty_unavailable WHERE unavailable_id=?", "i", [$id]);
         audit_log($conn, 'DELETE_UNAVAILABLE', "Deleted unavailable ID: $id");
-        set_flash('success', 'Unavailable slot deleted successfully!');
+        set_flash('success', 'Unavailable slot removed successfully!');
+        header("Location: setup.php"); exit;
+    }
+
+    if ($action === 'add_room_unavailable') {
+        $room_id = intval($_POST['room_id'] ?? 0);
+        $day_id = intval($_POST['day_id'] ?? 0);
+        $slot_id = intval($_POST['slot_id'] ?? 0);
+        $reason = $_POST['reason'] ?? '';
+        db_execute($conn, "INSERT INTO room_unavailable (room_id, day_id, slot_id, reason) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE reason=?", "iiiss", [$room_id, $day_id, $slot_id, $reason, $reason]);
+        audit_log($conn, 'ADD_ROOM_UNAVAILABLE', "Set unavailable for room=$room_id");
+        set_flash('success', 'Room unavailable slot saved!');
+        header("Location: setup.php"); exit;
+    }
+    if ($action === 'delete_room_unavailable') {
+        $id = intval($_POST['unavailable_id'] ?? 0);
+        db_execute($conn, "DELETE FROM room_unavailable WHERE unavailable_id=?", "i", [$id]);
+        audit_log($conn, 'DELETE_ROOM_UNAVAILABLE', "Deleted room unavailable ID: $id");
+        set_flash('success', 'Room unavailable removed!');
+        header("Location: setup.php"); exit;
+    }
+
+    if ($action === 'add_building_preference') {
+        $faculty_id = intval($_POST['faculty_id'] ?? 0);
+        $building_id = intval($_POST['building_id'] ?? 0);
+        $level = $_POST['preference_level'] ?? 'neutral';
+        db_execute($conn, "INSERT INTO building_preferences (faculty_id, building_id, preference_level) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE preference_level=?", "iiis", [$faculty_id, $building_id, $level, $level]);
+        audit_log($conn, 'ADD_BUILDING_PREF', "Set building pref for faculty=$faculty_id");
+        set_flash('success', 'Building preference saved!');
+        header("Location: setup.php"); exit;
+    }
+    if ($action === 'delete_building_preference') {
+        $id = intval($_POST['preference_id'] ?? 0);
+        db_execute($conn, "DELETE FROM building_preferences WHERE preference_id=?", "i", [$id]);
+        audit_log($conn, 'DELETE_BUILDING_PREF', "Deleted building pref ID: $id");
+        set_flash('success', 'Building preference removed!');
         header("Location: setup.php"); exit;
     }
 }
@@ -288,7 +327,9 @@ $assignments = db_get_rows($conn, "SELECT sa.*, c.class_name, s.subject_name, f.
 $rooms = db_get_rows($conn, "SELECT r.*, b.building_name FROM rooms r JOIN buildings b ON r.building_id = b.building_id ORDER BY r.room_id DESC");
 $buildings = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_id DESC");
 $preferences = db_get_rows($conn, "SELECT fp.*, f.faculty_name, d.day_name, ts.start_time, ts.end_time FROM faculty_preferences fp JOIN faculty f ON fp.faculty_id = f.faculty_id JOIN working_days d ON fp.day_id = d.day_id JOIN time_slots ts ON fp.slot_id = ts.slot_id ORDER BY fp.preference_id DESC");
-$unavailable = db_get_rows($conn, "SELECT fu.*, f.faculty_name, d.day_name, ts.start_time, ts.end_time FROM faculty_unavailable fu JOIN faculty f ON fu.faculty_id = f.faculty_id JOIN working_days d ON fu.day_id = d.day_id JOIN time_slots ts ON fu.slot_id = ts.slot_id ORDER BY fu.unavailable_id DESC");
+	$unavailable = db_get_rows($conn, "SELECT fu.*, f.faculty_name, d.day_name, ts.start_time, ts.end_time FROM faculty_unavailable fu JOIN faculty f ON fu.faculty_id = f.faculty_id JOIN working_days d ON fu.day_id = d.day_id JOIN time_slots ts ON fu.slot_id = ts.slot_id ORDER BY fu.unavailable_id DESC");
+	$room_unavailable = db_get_rows($conn, "SELECT ru.*, r.room_name, b.building_name, d.day_name, ts.start_time, ts.end_time FROM room_unavailable ru JOIN rooms r ON ru.room_id = r.room_id JOIN buildings b ON r.building_id = b.building_id JOIN working_days d ON ru.day_id = d.day_id JOIN time_slots ts ON ru.slot_id = ts.slot_id ORDER BY ru.unavailable_id DESC");
+	$building_preferences = db_get_rows($conn, "SELECT bp.*, f.faculty_name, b.building_name FROM building_preferences bp JOIN faculty f ON bp.faculty_id = f.faculty_id JOIN buildings b ON bp.building_id = b.building_id ORDER BY bp.preference_id DESC");
 $working_days = db_get_rows($conn, "SELECT * FROM working_days WHERE is_working=1 ORDER BY day_order");
 $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 AND slot_type='class' ORDER BY slot_number");
 
@@ -303,7 +344,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Data - AI Smart Timetable</title>
+    <title>Manage Data - Smart Timetable</title>
     <?php common_styles(); ?>
     <style>
         .stats-bar { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
@@ -534,7 +575,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <div class="form-group"><label>Class Name</label><input type="text" name="class_name" required placeholder="e.g., Class A"></div>
                             <div class="form-group"><label>Class Code</label><input type="text" name="class_code" required placeholder="e.g., FY-A"></div>
                             <div class="form-group"><label>Student Strength</label><input type="number" name="strength" value="0" min="0"></div>
-                            <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_add"><label for="skip_gen_add" style="color: #e74c3c;">Skip AI Generation (Keep Data)</label></div></div>
+                            <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_add"><label for="skip_gen_add" style="color: #e74c3c;">Skip Generation (Keep Data)</label></div></div>
                         </div>
                         <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
                             <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add Class
@@ -575,7 +616,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                             <div class="form-group"><label>Class Name</label><input type="text" name="class_name" value="<?php echo htmlspecialchars($row['class_name']); ?>" required></div>
                                             <div class="form-group"><label>Class Code</label><input type="text" name="class_code" value="<?php echo htmlspecialchars($row['class_code']); ?>" required></div>
                                             <div class="form-group"><label>Student Strength</label><input type="number" name="strength" value="<?php echo $row['strength']; ?>" min="0"></div>
-                                            <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_<?php echo $row['class_id']; ?>" <?php echo $row['skip_generation'] ? 'checked' : ''; ?>><label for="skip_gen_<?php echo $row['class_id']; ?>" style="color: #e74c3c;">Skip AI Generation (Keep Data)</label></div></div>
+                                            <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_<?php echo $row['class_id']; ?>" <?php echo $row['skip_generation'] ? 'checked' : ''; ?>><label for="skip_gen_<?php echo $row['class_id']; ?>" style="color: #e74c3c;">Skip Generation (Keep Data)</label></div></div>
                                         </div>
                                         <button type="submit" class="btn btn-submit" style="background:#3498db;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes</button>
                                     </form>
@@ -610,6 +651,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <div class="form-group"><label>Phone</label><input type="text" name="phone" placeholder="+91..."></div>
                             <div class="form-group"><label>Max Hours/Day</label><input type="number" name="max_hours_per_day" value="6" min="1" max="12"></div>
                             <div class="form-group"><label>Max Hours/Week</label><input type="number" name="max_hours_per_week" value="30" min="1" max="60"></div>
+                            <div class="form-group"><label>Assigned Hrs/Week</label><input type="number" name="assigned_hours_per_week" value="0" min="0" max="60" placeholder="0 = not set"></div>
                         </div>
                         <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
                             <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add Faculty
@@ -617,7 +659,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Name</th><th>Code</th><th>Department</th><th>Max/Day</th><th>Max/Week</th><th class="text-right">Actions</th></tr>
+                            <tr><th>ID</th><th>Name</th><th>Code</th><th>Department</th><th>Max/Day</th><th>Max/Wk</th><th>Assign/Wk</th><th class="text-right">Actions</th></tr>
                             <?php foreach($faculty as $row): ?>
                             <tr>
                                 <td><?php echo $row['faculty_id']; ?></td>
@@ -626,6 +668,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                 <td><?php echo htmlspecialchars($row['department']); ?></td>
                                 <td><?php echo $row['max_hours_per_day']; ?></td>
                                 <td><?php echo $row['max_hours_per_week']; ?></td>
+                                <td><?php echo $row['assigned_hours_per_week'] ? $row['assigned_hours_per_week'] : '<span style="color:#999;">—</span>'; ?></td>
                                 <td class="text-right">
                                     <button type="button" class="action-btn edit" onclick="toggleEdit('faculty-edit-<?php echo $row['faculty_id']; ?>')">
                                         <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Edit
@@ -638,7 +681,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                     </form>
                                 </td>
                             </tr>
-                            <tr><td colspan="7" style="padding:0;">
+                            <tr><td colspan="8" style="padding:0;">
                                 <div id="faculty-edit-<?php echo $row['faculty_id']; ?>" class="edit-form">
                                     <div class="form-section-title">Edit Faculty</div>
                                     <form method="POST" class="track-form">
@@ -653,6 +696,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                             <div class="form-group"><label>Phone</label><input type="text" name="phone" value="<?php echo htmlspecialchars($row['phone']); ?>"></div>
                                             <div class="form-group"><label>Max Hours/Day</label><input type="number" name="max_hours_per_day" value="<?php echo $row['max_hours_per_day']; ?>" min="1"></div>
                                             <div class="form-group"><label>Max Hours/Week</label><input type="number" name="max_hours_per_week" value="<?php echo $row['max_hours_per_week']; ?>" min="1"></div>
+                                            <div class="form-group"><label>Assigned Hrs/Week</label><input type="number" name="assigned_hours_per_week" value="<?php echo $row['assigned_hours_per_week'] ?: 0; ?>" min="0" placeholder="0 = not set"></div>
                                         </div>
                                         <button type="submit" class="btn btn-submit" style="background:#3498db;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes</button>
                                     </form>
@@ -686,6 +730,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <div class="form-group"><label>Lecture Hours/Week</label><input type="number" name="lecture_hours_per_week" value="3" min="0"></div>
                             <div class="form-group"><label>Lab Hours/Week</label><input type="number" name="lab_hours_per_week" value="2" min="0"></div>
                             <div class="form-group"><label>Department</label><input type="text" name="department" placeholder="e.g., Computer Science"></div>
+                            <div class="form-group"><label><input type="checkbox" name="is_minor" value="1"> Minor Subject (for last-slot scheduling)</label></div>
                         </div>
                         <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
                             <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add Subject
@@ -693,13 +738,14 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Name</th><th>Code</th><th>Type</th><th>Lec Hrs</th><th>Lab Hrs</th><th class="text-right">Actions</th></tr>
+                            <tr><th>ID</th><th>Name</th><th>Code</th><th>Type</th><th>Minor</th><th>Lec Hrs</th><th>Lab Hrs</th><th class="text-right">Actions</th></tr>
                             <?php foreach($subjects as $row): ?>
                             <tr>
                                 <td><?php echo $row['subject_id']; ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_code']); ?></td>
                                 <td><span class="badge badge-blue"><?php echo $row['subject_type']; ?></span></td>
+                                <td><?php echo $row['is_minor'] ? '<span class="badge badge-green">Minor</span>' : '<span class="badge" style="background:#eee;color:#999;">Core</span>'; ?></td>
                                 <td><?php echo $row['lecture_hours_per_week']; ?></td>
                                 <td><?php echo $row['lab_hours_per_week']; ?></td>
                                 <td class="text-right">
@@ -714,7 +760,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                     </form>
                                 </td>
                             </tr>
-                            <tr><td colspan="7" style="padding:0;">
+                            <tr><td colspan="8" style="padding:0;">
                                 <div id="subject-edit-<?php echo $row['subject_id']; ?>" class="edit-form">
                                     <div class="form-section-title">Edit Subject</div>
                                     <form method="POST" class="track-form">
@@ -728,6 +774,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                             <div class="form-group"><label>Lecture Hours/Week</label><input type="number" name="lecture_hours_per_week" value="<?php echo $row['lecture_hours_per_week']; ?>" min="0"></div>
                                             <div class="form-group"><label>Lab Hours/Week</label><input type="number" name="lab_hours_per_week" value="<?php echo $row['lab_hours_per_week']; ?>" min="0"></div>
                                             <div class="form-group"><label>Department</label><input type="text" name="department" value="<?php echo htmlspecialchars($row['department']); ?>"></div>
+                                            <div class="form-group"><label><input type="checkbox" name="is_minor" value="1" <?php echo $row['is_minor']?'checked':''; ?>> Minor Subject</label></div>
                                         </div>
                                         <button type="submit" class="btn btn-submit" style="background:#3498db;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes</button>
                                     </form>
@@ -1045,17 +1092,20 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
             </div>
         </div>
 
-        <!-- ==================== FACULTY PREFERENCES SECTION ==================== -->
+        <!-- ==================== PREFERENCES & CONSTRAINTS ==================== -->
         <div class="section-card">
             <div class="section-header collapsed" onclick="toggleSection('sec-preferences')">
                 <div class="header-left">
-                    <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg> Faculty Preferences
+                    <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg> Preferences & Constraints
                 </div>
                 <div class="toggle-icon"><svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg></div>
             </div>
             <div class="section-body collapsed" id="sec-preferences">
                 <div class="inner-wrapper">
-                    <div class="form-section-title">Set Faculty Preference</div>
+
+                    <!-- ---- Faculty Time Preferences ---- -->
+                    <div class="form-section-title" style="margin-top:0;">Faculty Time Preferences</div>
+                    <p style="font-size:12px;color:#888;margin-bottom:16px;">Mark specific slots as preferred, neutral, or avoid for each faculty member.</p>
                     <form method="POST" style="margin-bottom:20px;" class="track-form">
                         <?php csrf_field(); ?>
                         <input type="hidden" name="action" value="add_preference">
@@ -1089,27 +1139,16 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                         </div>
                         <?php endforeach; ?>
                         <?php if(empty($preferences)): ?>
-                        <div class="empty-state">
-                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        <div class="data-table"><table><tr><td class="empty-state" style="border:none;text-align:center;padding:20px;color:#999;font-size:13px;">
+                            <svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:#ddd;display:block;margin:0 auto 8px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
                             <div>No preferences set yet.</div>
-                        </div>
+                        </td></tr></table></div>
                         <?php endif; ?>
                     </div>
-                </div>
-            </div>
-        </div>
 
-        <!-- ==================== FACULTY UNAVAILABLE SLOTS SECTION ==================== -->
-        <div class="section-card">
-            <div class="section-header collapsed" onclick="toggleSection('sec-unavailable')">
-                <div class="header-left">
-                    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg> Faculty Unavailable Slots
-                </div>
-                <div class="toggle-icon"><svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg></div>
-            </div>
-            <div class="section-body collapsed" id="sec-unavailable">
-                <div class="inner-wrapper">
-                    <div class="form-section-title">Block Unavailable Slot</div>
+                    <!-- ---- Faculty Unavailable Slots ---- -->
+                    <div class="form-section-title" style="margin-top:40px;padding-top:16px;border-top:1px solid #eee;">Faculty Unavailable Slots</div>
+                    <p style="font-size:12px;color:#888;margin-bottom:16px;">Permanently block specific slots where a faculty member is not available (e.g., meetings, other duties).</p>
                     <form method="POST" style="margin-bottom:20px;" class="track-form">
                         <?php csrf_field(); ?>
                         <input type="hidden" name="action" value="add_unavailable">
@@ -1150,6 +1189,94 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <?php endif; ?>
                         </table>
                     </div>
+
+                    <!-- ---- Room Unavailable Slots ---- -->
+                    <div class="form-section-title" style="margin-top:40px;padding-top:16px;border-top:1px solid #eee;">Room Unavailable Slots</div>
+                    <p style="font-size:12px;color:#888;margin-bottom:16px;">Block specific rooms during certain slots (e.g., maintenance, special events).</p>
+                    <form method="POST" style="margin-bottom:20px;" class="track-form">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="add_room_unavailable">
+                        <div class="form-grid">
+                            <div class="form-group"><label>Room</label><select name="room_id" required><option value="">-- Select Room --</option><?php foreach($rooms as $r): ?><option value="<?php echo $r['room_id']; ?>"><?php echo htmlspecialchars($r['room_name']); ?> (<?php echo htmlspecialchars($r['building_name']); ?>)</option><?php endforeach; ?></select></div>
+                            <div class="form-group"><label>Day</label><select name="day_id" required><option value="">-- Select Day --</option><?php foreach($working_days as $d): ?><option value="<?php echo $d['day_id']; ?>"><?php echo $d['day_name']; ?></option><?php endforeach; ?></select></div>
+                            <div class="form-group"><label>Time Slot</label><select name="slot_id" required><option value="">-- Select Slot --</option><?php foreach($time_slots as $s): ?><option value="<?php echo $s['slot_id']; ?>"><?php echo $s['start_time']; ?> - <?php echo $s['end_time']; ?></option><?php endforeach; ?></select></div>
+                            <div class="form-group"><label>Reason</label><input type="text" name="reason" placeholder="e.g., Maintenance"></div>
+                        </div>
+                        <button type="submit" class="btn btn-submit btn-warning">
+                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg> Block Room Slot
+                        </button>
+                    </form>
+                    <div class="data-table">
+                        <table>
+                            <tr><th>Room</th><th>Building</th><th>Day</th><th>Time</th><th>Reason</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($room_unavailable as $row): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['room_name']); ?></td>
+                                <td><?php echo htmlspecialchars($row['building_name']); ?></td>
+                                <td><?php echo $row['day_name']; ?></td>
+                                <td><?php echo $row['start_time']; ?> - <?php echo $row['end_time']; ?></td>
+                                <td><?php echo htmlspecialchars($row['reason']); ?></td>
+                                <td class="text-right">
+                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Remove this block?');" class="track-form">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="action" value="delete_room_unavailable">
+                                        <input type="hidden" name="unavailable_id" value="<?php echo $row['unavailable_id']; ?>">
+                                        <button type="submit" class="action-btn delete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg> Remove</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php if(empty($room_unavailable)): ?>
+                            <tr><td colspan="6" class="empty-state">
+                                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                                <div>No room blocks set.</div>
+                            </td></tr>
+                            <?php endif; ?>
+                        </table>
+                    </div>
+
+                    <!-- ---- Building Preferences ---- -->
+                    <div class="form-section-title" style="margin-top:40px;padding-top:16px;border-top:1px solid #eee;">Building Preferences</div>
+                    <p style="font-size:12px;color:#888;margin-bottom:16px;">Set preferred or avoided buildings for each faculty member to minimize travel between buildings.</p>
+                    <form method="POST" style="margin-bottom:20px;" class="track-form">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="add_building_preference">
+                        <div class="form-grid">
+                            <div class="form-group"><label>Faculty</label><select name="faculty_id" required><option value="">-- Select Faculty --</option><?php foreach($faculty_list as $r): ?><option value="<?php echo $r['faculty_id']; ?>"><?php echo htmlspecialchars($r['faculty_name']); ?></option><?php endforeach; ?></select></div>
+                            <div class="form-group"><label>Building</label><select name="building_id" required><option value="">-- Select Building --</option><?php foreach($buildings as $b): ?><option value="<?php echo $b['building_id']; ?>"><?php echo htmlspecialchars($b['building_name']); ?></option><?php endforeach; ?></select></div>
+                            <div class="form-group"><label>Preference</label><select name="preference_level"><option value="preferred">Preferred</option><option value="neutral" selected>Neutral</option><option value="avoid">Avoid</option></select></div>
+                        </div>
+                        <button type="submit" class="btn btn-submit btn-success" style="background:#8e44ad;">
+                            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Save Building Preference
+                        </button>
+                    </form>
+                    <div class="data-table">
+                        <table>
+                            <tr><th>Faculty</th><th>Building</th><th>Level</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($building_preferences as $row): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['faculty_name']); ?></td>
+                                <td><?php echo htmlspecialchars($row['building_name']); ?></td>
+                                <td><span class="badge <?php echo $row['preference_level']=='preferred'?'badge-green':($row['preference_level']=='avoid'?'badge-red':'badge-yellow'); ?>"><?php echo ucfirst($row['preference_level']); ?></span></td>
+                                <td class="text-right">
+                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this preference?');" class="track-form">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="action" value="delete_building_preference">
+                                        <input type="hidden" name="preference_id" value="<?php echo $row['preference_id']; ?>">
+                                        <button type="submit" class="action-btn delete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg> Remove</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php if(empty($building_preferences)): ?>
+                            <tr><td colspan="4" class="empty-state">
+                                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                                <div>No building preferences set.</div>
+                            </td></tr>
+                            <?php endif; ?>
+                        </table>
+                    </div>
+
                 </div>
             </div>
         </div>

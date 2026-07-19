@@ -63,7 +63,7 @@ function pdf_export_link($mode, $id) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Timetable - AI Smart Timetable</title>
+    <title>View Timetable - Smart Timetable</title>
     <?php common_styles(); ?>
     <style>
         .timetable-container { overflow-x: auto; }
@@ -143,7 +143,7 @@ function pdf_export_link($mode, $id) {
             <div class="content-box-body">
                 <div class="print-header">
                     <h2>Ajeenkya DY Patil University</h2>
-                    <p>AI-Generated Academic Timetable | <?php echo date('F Y'); ?></p>
+                    <p>Academic Timetable | <?php echo date('F Y'); ?></p>
                     <?php if ($selected_name): ?><p><strong><?php echo htmlspecialchars($selected_name); ?></strong></p><?php endif; ?>
                 </div>
 
