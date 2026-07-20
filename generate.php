@@ -66,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                 $class_room_tracking = []; 
                 $errors = [];
                 $lab_errors = [];
+                $placed_sessions = []; // In-memory collection of all successful placements
 
                 // Pre-load faculty unavailable slots
                 foreach ($faculty_unavailable as $fu) { 
@@ -83,241 +84,234 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                     $faculty_pref_lookup[$fp['faculty_id']][$fp['day_id']][$fp['slot_id']] = $fp['preference_level'];
                 }
 
-	                // Sort assignments: Minor subjects first (to grab last slots), then labs, then largest hour loads
-	                usort($assignments, function($a, $b) {
-	                    if ($a['is_minor'] != $b['is_minor'])
-	                        return $b['is_minor'] - $a['is_minor']; // Minor first
-	                    if ($a['lab_hours_per_week'] != $b['lab_hours_per_week'])
-	                        return $b['lab_hours_per_week'] - $a['lab_hours_per_week'];
-	                    return ($b['lecture_hours_per_week'] + $b['lab_hours_per_week']) -
-	                           ($a['lecture_hours_per_week'] + $a['lab_hours_per_week']);
+	                // Build flat list of all sessions to place (sorted by difficulty, across ALL classes)
+	                $all_sessions = [];
+	                foreach ($classes as $class) {
+	                    $cid = $class['class_id'];
+	                    $ca = array_filter($assignments, function($a) use ($cid) { return $a['class_id'] == $cid; });
+	                    foreach ($ca as $a) {
+	                        $lh = $a['subject_type'] === 'lecture' ? 0 : $a['lab_hours_per_week'];
+	                        $leh = $a['subject_type'] === 'lab' ? 0 : $a['lecture_hours_per_week'];
+	                        for ($i = 0; $i < $lh; $i += 2) $all_sessions[] = ['type'=>'lab','a'=>$a,'c'=>$class];
+	                        for ($i = 0; $i < $leh; $i++) $all_sessions[] = ['type'=>'lecture','a'=>$a,'c'=>$class];
+	                    }
+	                }
+
+	                // Sort: minors first (to grab last slots), then labs, then by hours descending
+	                usort($all_sessions, function($a, $b) {
+	                    $am = $a['a']['is_minor']; $bm = $b['a']['is_minor'];
+	                    if ($am != $bm) return $bm - $am;
+	                    $al = ($a['type']==='lab')?1:0; $bl = ($b['type']==='lab')?1:0;
+	                    if ($al != $bl) return $bl - $al;
+	                    $ah = $a['a']['lecture_hours_per_week']+$a['a']['lab_hours_per_week'];
+	                    $bh = $b['a']['lecture_hours_per_week']+$b['a']['lab_hours_per_week'];
+	                    return $bh - $ah;
 	                });
 
-                foreach ($classes as $class) {
-                    $class_id = $class['class_id'];
-                    $class_strength = $class['strength'];
-                    $class_assignments = array_filter($assignments, function($a) use ($class_id) { 
-                        return $a['class_id'] == $class_id; 
-                    });
+	                // Place sessions globally (not class-by-class)
+	                foreach ($all_sessions as $sess) {
+	                    $assignment = $sess['a'];
+	                    $class = $sess['c'];
+	                    $is_lab = ($sess['type'] === 'lab');
+	                    $class_id = $class['class_id'];
+	                    $class_strength = $class['strength'];
+	                    $assignment_id = $assignment['assignment_id'];
+	                    $subject_id = $assignment['subject_id'];
+	                    $faculty_id = $assignment['faculty_id'];
+	                    $preferred_slot_id = $assignment['preferred_slot_id'] ?? null;
 
-                    foreach ($class_assignments as $assignment) {
-                        $assignment_id = $assignment['assignment_id'];
-                        $subject_id = $assignment['subject_id'];
-                        $faculty_id = $assignment['faculty_id'];
-                        $preferred_slot_id = $assignment['preferred_slot_id'] ?? null;
-                        $lecture_hours = $assignment['subject_type'] === 'lab' ? 0 : $assignment['lecture_hours_per_week'];
-                        $lab_hours = $assignment['subject_type'] === 'lecture' ? 0 : $assignment['lab_hours_per_week'];
-
-                        // --- PLACE LABS (Requires 2 consecutive slots) ---
-                        $labs_placed = 0;
-                        while ($labs_placed < $lab_hours) {
-                            $best_score = -9999;
-                            $best_day = null; 
-                            $best_idx = null; 
-                            $best_room = null;
-
-                            foreach ($days as $day) {
-                                $day_id = $day['day_id'];
-                                for ($i = 0; $i < count($class_slots) - 1; $i++) {
-                                    $slot1 = $class_slots[$i];
-                                    $slot2 = $class_slots[$i + 1];
-
-                                    // Check Class Conflicts
-                                    if (isset($class_daily_schedule[$class_id][$day_id][$slot1['slot_id']]) || 
-                                        isset($class_daily_schedule[$class_id][$day_id][$slot2['slot_id']])) continue;
-                                    
-                                    // Check Faculty Conflicts (unavailable slots)
-                                    if (isset($faculty_daily_schedule[$faculty_id][$day_id][$slot1['slot_id']]) || 
-                                        isset($faculty_daily_schedule[$faculty_id][$day_id][$slot2['slot_id']])) continue;
-                                    
-                                    // Check Faculty Workload
-                                    $f_day_hrs = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
-                                    $f_week_hrs = $faculty_weekly_hours[$faculty_id] ?? 0;
-                                    if (($f_day_hrs + 2) > $assignment['max_hours_per_day'] || 
-                                        ($f_week_hrs + 2) > $assignment['max_hours_per_week']) continue;
-
-	                                    // Check Faculty Preferences - Skip "avoid" slots
-	                                    $pref1 = $faculty_pref_lookup[$faculty_id][$day_id][$slot1['slot_id']] ?? 'neutral';
-	                                    $pref2 = $faculty_pref_lookup[$faculty_id][$day_id][$slot2['slot_id']] ?? 'neutral';
-	                                    if ($pref1 === 'avoid' || $pref2 === 'avoid') continue;
-
-	                                    // Minor Subject Last-Slot Constraint (for labs spanning the last slot)
-	                                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
-	                                    if (in_array($day_id, $minor_days)) {
-	                                        if ($slot1['slot_number'] == $last_slot_number || $slot2['slot_number'] == $last_slot_number) {
-	                                            if (!$assignment['is_minor']) continue; // Hard block
-	                                            $score += 200;
+	                    if ($is_lab) {
+	                        // --- PLACE LAB (2 consecutive slots) ---
+	                        $best_score = -9999; $best_day = null; $best_idx = null; $best_room = null;
+	                        foreach ($days as $day) {
+	                            $day_id = $day['day_id'];
+	                            for ($i = 0; $i < count($class_slots) - 1; $i++) {
+	                                $s1 = $class_slots[$i]; $s2 = $class_slots[$i + 1];
+	                                if (isset($class_daily_schedule[$class_id][$day_id][$s1['slot_id']]) ||
+	                                    isset($class_daily_schedule[$class_id][$day_id][$s2['slot_id']])) continue;
+	                                if (isset($faculty_daily_schedule[$faculty_id][$day_id][$s1['slot_id']]) ||
+	                                    isset($faculty_daily_schedule[$faculty_id][$day_id][$s2['slot_id']])) continue;
+	                                $fd = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
+	                                $fw = $faculty_weekly_hours[$faculty_id] ?? 0;
+	                                if (($fd + 2) > $assignment['max_hours_per_day'] || ($fw + 2) > $assignment['max_hours_per_week']) continue;
+	                                $p1 = $faculty_pref_lookup[$faculty_id][$day_id][$s1['slot_id']] ?? 'neutral';
+	                                $p2 = $faculty_pref_lookup[$faculty_id][$day_id][$s2['slot_id']] ?? 'neutral';
+	                                if ($p1 === 'avoid' || $p2 === 'avoid') continue;
+	                                $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
+	                                if (in_array($day_id, $minor_days) && ($s1['slot_number'] == $last_slot_number || $s2['slot_number'] == $last_slot_number)) {
+	                                    if (!$assignment['is_minor']) continue;
+	                                }
+	                                foreach ($rooms as $room) {
+	                                    if ($room['room_type'] !== 'lab') continue;
+	                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$s1['slot_id']]) ||
+	                                        isset($room_daily_schedule[$room['room_id']][$day_id][$s2['slot_id']])) continue;
+	                                    $score = 5;
+	                                    if ($room['has_ac']) $score += 5;
+	                                    $score += max(0, 20 - abs($room['capacity'] - $class_strength));
+	                                    if ($preferred_slot_id && ($s1['slot_id']==$preferred_slot_id || $s2['slot_id']==$preferred_slot_id)) $score += 100;
+	                                    if ($p1 === 'preferred' || $p2 === 'preferred') $score += 30;
+	                                    if ($assignment['is_minor'] && in_array($day_id, $minor_days)) $score += 200;
+	                                    if ($score > $best_score) { $best_score=$score; $best_day=$day; $best_idx=$i; $best_room=$room; }
+	                                }
+	                            }
+	                        }
+	                        if ($best_day && $best_idx !== null && $best_room) {
+	                            $day_id = $best_day['day_id'];
+	                            foreach ([$class_slots[$best_idx], $class_slots[$best_idx + 1]] as $slot) {
+	                                $placed_sessions[] = ['class_id'=>$class_id,'day_id'=>$day_id,'slot_id'=>$slot['slot_id'],'room_id'=>$best_room['room_id'],'subject_id'=>$subject_id,'faculty_id'=>$faculty_id,'assignment_id'=>$assignment_id,'is_lab'=>1,'energy_score'=>$best_score];
+	                                $class_daily_schedule[$class_id][$day_id][$slot['slot_id']] = $subject_id;
+	                                $faculty_daily_schedule[$faculty_id][$day_id][$slot['slot_id']] = true;
+	                                $room_daily_schedule[$best_room['room_id']][$day_id][$slot['slot_id']] = true;
+	                                $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id]??0) + 1;
+	                                $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id]??0) + 1;
+	                            }
+	                        } else {
+	                            $errors[] = "Failed to place Lab: {$assignment['subject_name']} for {$class['class_name']}";
+	                        }
+	                    } else {
+	                        // --- PLACE LECTURE (single slot) ---
+	                        $best_score = -9999; $best_day = null; $best_slot = null; $best_room = null;
+	                        foreach ($days as $day) {
+	                            $day_id = $day['day_id'];
+	                            foreach ($class_slots as $slot) {
+	                                $slot_id = $slot['slot_id'];
+	                                if (isset($class_daily_schedule[$class_id][$day_id][$slot_id]) ||
+	                                    isset($faculty_daily_schedule[$faculty_id][$day_id][$slot_id])) continue;
+	                                $fd = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
+	                                $fw = $faculty_weekly_hours[$faculty_id] ?? 0;
+	                                if ($fd >= $assignment['max_hours_per_day'] || $fw >= $assignment['max_hours_per_week']) continue;
+	                                $st = false;
+	                                foreach ($class_slots as $s) {
+	                                    if (isset($class_daily_schedule[$class_id][$day_id][$s['slot_id']]) &&
+	                                        $class_daily_schedule[$class_id][$day_id][$s['slot_id']] == $subject_id) { $st = true; break; }
+	                                }
+	                                if ($st) continue;
+	                                $pref = $faculty_pref_lookup[$faculty_id][$day_id][$slot_id] ?? 'neutral';
+	                                if ($pref === 'avoid') continue;
+	                                $is_last_slot = ($slot['slot_number'] == $last_slot_number);
+	                                $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
+	                                if ($is_last_slot && in_array($day_id, $minor_days)) {
+	                                    if (!$assignment['is_minor']) continue;
+	                                    $score = 200;
+	                                } else { $score = 0; }
+	                                foreach ($rooms as $room) {
+	                                    if ($room['room_type']==='lab' || $room['capacity']<$class_strength) continue;
+	                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
+	                                    $s = $score;
+	                                    $prev = $class_room_tracking[$class_id][$day_id] ?? null;
+	                                    if ($prev && $prev==$room['building_id']) $s += 15;
+	                                    if ($room['has_ac']||$room['building_ac']) $s += 5;
+	                                    $s += max(0, 20-abs($room['capacity']-$class_strength));
+	                                    if ($preferred_slot_id && $slot_id==$preferred_slot_id) $s += 100;
+	                                    if ($pref === 'preferred') $s += 30;
+	                                    if ($s > $best_score) { $best_score=$s; $best_day=$day; $best_slot=$slot; $best_room=$room; }
+	                                }
+	                            }
+	                        }
+	                        if ($best_day && $best_slot && $best_room) {
+	                            $placed_sessions[] = ['class_id'=>$class_id,'day_id'=>$best_day['day_id'],'slot_id'=>$best_slot['slot_id'],'room_id'=>$best_room['room_id'],'subject_id'=>$subject_id,'faculty_id'=>$faculty_id,'assignment_id'=>$assignment_id,'is_lab'=>0,'energy_score'=>$best_score];
+	                            $class_daily_schedule[$class_id][$best_day['day_id']][$best_slot['slot_id']] = $subject_id;
+	                            $faculty_daily_schedule[$faculty_id][$best_day['day_id']][$best_slot['slot_id']] = true;
+	                            $room_daily_schedule[$best_room['room_id']][$best_day['day_id']][$best_slot['slot_id']] = true;
+	                            $faculty_daily_hours[$faculty_id][$best_day['day_id']] = ($faculty_daily_hours[$faculty_id][$best_day['day_id']]??0) + 1;
+	                            $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id]??0) + 1;
+	                            $class_room_tracking[$class_id][$best_day['day_id']] = $best_room['building_id'];
+	                        } else {
+	                            $errors[] = "Failed to place Lecture: {$assignment['subject_name']} for {$class['class_name']}";
+	                        }
+	                    }
+	                }
+	                // ---- Backtracking Pass: try to resolve failures by removing low-energy placements ----
+	                if (!empty($errors)) {
+	                    $retry_errors = [];
+	                    foreach ($errors as $err) {
+	                        // Parse the error to find the assignment
+	                        if (preg_match('/Failed to place (Lecture|Lab): (.+) for (.+)/', $err, $m)) {
+	                            $subj_name = $m[2];
+	                            $class_name = $m[3];
+	                            
+	                            // Find the assignment that failed
+	                            $failed_assignments = array_filter($assignments, function($a) use ($subj_name, $class_name) {
+	                                return $a['subject_name'] == $subj_name && $a['class_name'] == $class_name;
+	                            });
+	                            
+	                            foreach ($failed_assignments as $fa) {
+	                                // Find this faculty's lowest-energy placed session
+	                                $fac_id = $fa['faculty_id'];
+	                                $candidates = [];
+	                                foreach ($placed_sessions as $idx => $ps) {
+	                                    if ($ps['faculty_id'] == $fac_id && $ps['energy_score'] < 100) {
+	                                        $candidates[$idx] = $ps['energy_score'];
+	                                    }
+	                                }
+	                                asort($candidates);
+	                                
+	                                foreach ($candidates as $remove_idx => $score) {
+	                                    $removed = $placed_sessions[$remove_idx];
+	                                    
+	                                    // Remove from tracking arrays
+	                                    unset($class_daily_schedule[$removed['class_id']][$removed['day_id']][$removed['slot_id']]);
+	                                    unset($faculty_daily_schedule[$removed['faculty_id']][$removed['day_id']][$removed['slot_id']]);
+	                                    unset($room_daily_schedule[$removed['room_id']][$removed['day_id']][$removed['slot_id']]);
+	                                    $faculty_daily_hours[$removed['faculty_id']][$removed['day_id']] = max(0, ($faculty_daily_hours[$removed['faculty_id']][$removed['day_id']] ?? 1) - 1);
+	                                    $faculty_weekly_hours[$removed['faculty_id']] = max(0, ($faculty_weekly_hours[$removed['faculty_id']] ?? 1) - 1);
+	                                    unset($placed_sessions[$remove_idx]);
+	                                    
+	                                    // Try placing the removed session back (it may find a new spot)
+	                                    $removed_ok = false;
+	                                    foreach ($days as $day) {
+	                                        foreach ($class_slots as $slot) {
+	                                            $sid = $slot['slot_id'];
+	                                            if (isset($class_daily_schedule[$removed['class_id']][$day['day_id']][$sid]) ||
+	                                                isset($faculty_daily_schedule[$fac_id][$day['day_id']][$sid])) continue;
+	                                            foreach ($rooms as $room) {
+	                                                if (isset($room_daily_schedule[$room['room_id']][$day['day_id']][$sid])) continue;
+	                                                // Place it back
+	                                                $placed_sessions[] = [
+	                                                    'class_id' => $removed['class_id'], 'day_id' => $day['day_id'], 'slot_id' => $sid,
+	                                                    'room_id' => $room['room_id'], 'subject_id' => $removed['subject_id'],
+	                                                    'faculty_id' => $fac_id, 'assignment_id' => $removed['assignment_id'],
+	                                                    'is_lab' => $removed['is_lab'], 'energy_score' => 10,
+	                                                ];
+	                                                $class_daily_schedule[$removed['class_id']][$day['day_id']][$sid] = $removed['subject_id'];
+	                                                $faculty_daily_schedule[$fac_id][$day['day_id']][$sid] = true;
+	                                                $room_daily_schedule[$room['room_id']][$day['day_id']][$sid] = true;
+	                                                $faculty_daily_hours[$fac_id][$day['day_id']] = ($faculty_daily_hours[$fac_id][$day['day_id']] ?? 0) + 1;
+	                                                $faculty_weekly_hours[$fac_id] = ($faculty_weekly_hours[$fac_id] ?? 0) + 1;
+	                                                $removed_ok = true;
+	                                                break 3;
+	                                            }
 	                                        }
 	                                    }
-
-	                                    // Score Rooms (only lab rooms)
-                                    foreach ($rooms as $room) {
-                                        if ($room['room_type'] !== 'lab' || $room['capacity'] < $class_strength) continue;
-                                        if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) || 
-                                            isset($room_daily_schedule[$room['room_id']][$day_id][$slot2['slot_id']])) continue;
-
-                                        $score = 0;
-                                        // Energy efficiency bonus
-                                        if ($room['has_ac'] || $room['building_ac']) $score += 10;
-                                        // Capacity match bonus
-                                        $score += max(0, 20 - abs($room['capacity'] - $class_strength));
-                                        
-                                        // BIG BONUS for preferred slot
-                                        if ($preferred_slot_id) {
-                                            if ($slot1['slot_id'] == $preferred_slot_id || $slot2['slot_id'] == $preferred_slot_id) {
-                                                $score += 100; // Major bonus for preferred slot
-                                            }
-                                        }
-                                        
-                                        // Bonus for faculty "preferred" slots
-                                        if ($pref1 === 'preferred' || $pref2 === 'preferred') {
-                                            $score += 30;
-                                        }
-
-                                        if ($score > $best_score) {
-                                            $best_score = $score; 
-                                            $best_day = $day; 
-                                            $best_idx = $i; 
-                                            $best_room = $room;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if ($best_day && $best_idx !== null && $best_room) {
-                                $day_id = $best_day['day_id'];
-                                foreach ([$class_slots[$best_idx], $class_slots[$best_idx + 1]] as $slot) {
-                                    $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)");
-                                    $stmt->bind_param("iiiiiiii", $class_id, $day_id, $slot['slot_id'], $best_room['room_id'], $subject_id, $faculty_id, $assignment_id, $best_score);
-                                    $stmt->execute();
-                                    $stmt->close();
-                                    
-                                    $class_daily_schedule[$class_id][$day_id][$slot['slot_id']] = $subject_id;
-                                    $faculty_daily_schedule[$faculty_id][$day_id][$slot['slot_id']] = true;
-                                    $room_daily_schedule[$best_room['room_id']][$day_id][$slot['slot_id']] = true;
-                                    $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id] ?? 0) + 1;
-                                    $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id] ?? 0) + 1;
-                                }
-                                $labs_placed += 2;
-                            } else {
-                                $error_msg = "Failed to place Lab: {$assignment['subject_name']} for {$assignment['class_name']}";
-                                if ($preferred_slot_id) {
-                                    $error_msg .= " (Preferred slot: " . date('h:i A', strtotime($slot1['start_time'])) . ")";
-                                }
-                                $errors[] = $error_msg;
-                                $lab_errors[] = $error_msg;
-                                break;
-                            }
-                        }
-
-                        // --- PLACE LECTURES (Single slots) ---
-                        $lectures_placed = 0;
-                        while ($lectures_placed < $lecture_hours) {
-                            $best_score = -9999;
-                            $best_day = null; 
-                            $best_slot = null; 
-                            $best_room = null;
-
-                            foreach ($days as $day) {
-                                $day_id = $day['day_id'];
-                                foreach ($class_slots as $slot) {
-                                    $slot_id = $slot['slot_id'];
-
-                                    // Check Class Conflicts
-                                    if (isset($class_daily_schedule[$class_id][$day_id][$slot_id]) || 
-                                        isset($faculty_daily_schedule[$faculty_id][$day_id][$slot_id])) continue;
-                                    
-                                    // Check Faculty Workload
-                                    $f_day_hrs = $faculty_daily_hours[$faculty_id][$day_id] ?? 0;
-                                    $f_week_hrs = $faculty_weekly_hours[$faculty_id] ?? 0;
-                                    if ($f_day_hrs >= $assignment['max_hours_per_day'] || 
-                                        $f_week_hrs >= $assignment['max_hours_per_week']) continue;
-
-                                    // Check subject spread (prevent same subject twice in one day)
-                                    $subject_today = false;
-                                    foreach ($class_slots as $s) {
-                                        if (isset($class_daily_schedule[$class_id][$day_id][$s['slot_id']]) && 
-                                            $class_daily_schedule[$class_id][$day_id][$s['slot_id']] == $subject_id) {
-                                            $subject_today = true; 
-                                            break;
-                                        }
-                                    }
-                                    if ($subject_today) continue;
-
-	                                    // Check Faculty Preferences - Skip "avoid" slots
-	                                    $pref = $faculty_pref_lookup[$faculty_id][$day_id][$slot_id] ?? 'neutral';
-	                                    if ($pref === 'avoid') continue;
-
-	                                    // Minor Subject Last-Slot Constraint — HARD BLOCK
-	                                    // Minor subjects MUST go in the last slot on designated days
-	                                    $is_last_slot = ($slot['slot_number'] == $last_slot_number);
-	                                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
-	                                    if ($is_last_slot && in_array($day_id, $minor_days)) {
-	                                        if (!$assignment['is_minor']) continue; // Hard block
-	                                        $score += 200; // Strong bonus for correct minor placement
+	                                    
+	                                    if ($removed_ok) {
+	                                        // The backtrack worked — remove this from errors
+	                                        continue 2; // Continue to next error
+	                                    } else {
+	                                        // Restore the removal
+	                                        $placed_sessions[$remove_idx] = $removed;
+	                                        $class_daily_schedule[$removed['class_id']][$removed['day_id']][$removed['slot_id']] = $removed['subject_id'];
+	                                        $faculty_daily_schedule[$removed['faculty_id']][$removed['day_id']][$removed['slot_id']] = true;
+	                                        $room_daily_schedule[$removed['room_id']][$removed['day_id']][$removed['slot_id']] = true;
+	                                        $faculty_daily_hours[$removed['faculty_id']][$removed['day_id']] = ($faculty_daily_hours[$removed['faculty_id']][$removed['day_id']] ?? 0) + 1;
+	                                        $faculty_weekly_hours[$removed['faculty_id']] = ($faculty_weekly_hours[$removed['faculty_id']] ?? 0) + 1;
 	                                    }
+	                                }
+	                                $retry_errors[] = $err;
+	                            }
+	                        }
+	                    }
+	                    $errors = $retry_errors;
+	                }
 
-	                                    // Score Rooms (only classrooms for lectures)
-                                    foreach ($rooms as $room) {
-                                        if ($room['room_type'] === 'lab' || $room['capacity'] < $class_strength) continue;
-                                        if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
-
-                                        $score = 0;
-                                        // Building continuity bonus
-                                        $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
-                                        if ($prev_building && $prev_building == $room['building_id']) $score += 15;
-                                        // AC bonus
-                                        if ($room['has_ac'] || $room['building_ac']) $score += 5;
-                                        // Capacity match bonus
-                                        $score += max(0, 20 - abs($room['capacity'] - $class_strength));
-                                        
-                                        // BIG BONUS for preferred slot
-                                        if ($preferred_slot_id && $slot_id == $preferred_slot_id) {
-                                            $score += 100; // Major bonus for preferred slot
-                                        }
-                                        
-	                                        // Bonus for faculty "preferred" slots
-	                                        if ($pref === 'preferred') {
-	                                            $score += 30;
-	                                        }
-
-	                                        if ($score > $best_score) {
-                                            $best_score = $score; 
-                                            $best_day = $day; 
-                                            $best_slot = $slot; 
-                                            $best_room = $room;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if ($best_day && $best_slot && $best_room) {
-                                $day_id = $best_day['day_id'];
-                                $slot_id = $best_slot['slot_id'];
-                                $room_id = $best_room['room_id'];
-
-                                $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
-                                $stmt->bind_param("iiiiiiii", $class_id, $day_id, $slot_id, $room_id, $subject_id, $faculty_id, $assignment_id, $best_score);
-                                $stmt->execute();
-                                $stmt->close();
-                                
-                                $class_daily_schedule[$class_id][$day_id][$slot_id] = $subject_id;
-                                $faculty_daily_schedule[$faculty_id][$day_id][$slot_id] = true;
-                                $room_daily_schedule[$room_id][$day_id][$slot_id] = true;
-                                $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id] ?? 0) + 1;
-                                $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id] ?? 0) + 1;
-                                $class_room_tracking[$class_id][$day_id] = $best_room['building_id'];
-                                $lectures_placed++;
-                            } else {
-                                $error_msg = "Failed to place Lecture: {$assignment['subject_name']} for {$assignment['class_name']}";
-                                if ($preferred_slot_id) {
-                                    $error_msg .= " (Preferred slot: " . date('h:i A', strtotime($slot['start_time'])) . ")";
-                                }
-                                $errors[] = $error_msg;
-                                break;
-                            }
-                        }
+	                // Batch insert all placed sessions into the database
+                if (!empty($placed_sessions)) {
+                    $stmt = $conn->prepare("INSERT INTO timetable (class_id, day_id, slot_id, room_id, subject_id, faculty_id, assignment_id, is_lab, energy_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    foreach ($placed_sessions as $ps) {
+                        $stmt->bind_param("iiiiiiiii", $ps['class_id'], $ps['day_id'], $ps['slot_id'], $ps['room_id'], $ps['subject_id'], $ps['faculty_id'], $ps['assignment_id'], $ps['is_lab'], $ps['energy_score']);
+                        $stmt->execute();
                     }
+                    $stmt->close();
                 }
 
                 $conn->commit();
