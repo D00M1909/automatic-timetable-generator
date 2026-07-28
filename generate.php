@@ -25,7 +25,9 @@ $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORD
 	$days = $working_days;
 	$class_slots = array_values(array_filter($time_slots, function($s) { return $s['slot_type'] === 'class'; }));
 
-	// Build lookup: year_of_study → [day_ids] where last-slot = minor constraint applies
+	// Build lookup: year_of_study → the only day_ids that year's classes ever meet on
+	// (e.g. Second Year Mon/Tue/Wed, Third/Fourth Year Wed/Thu/Fri); the last slot on
+	// those days is additionally reserved for minor subjects.
 	$year_minor_days = [];
 	foreach ($year_working_days as $ywd) {
 	    $year_minor_days[$ywd['year_of_study']][] = $ywd['day_id'];
@@ -125,11 +127,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                    // teaches several classes' minor slot at once, so exempt it from the normal
 	                    // one-class-at-a-time faculty clash/hour-cap rules (mirrors the Online room exemption).
 	                    $is_minor_assignment = (bool) $assignment['is_minor'];
+	                    // Each year of study only runs on its own fixed day set (e.g. Second Year
+	                    // Mon/Tue/Wed, Third/Fourth Year Wed/Thu/Fri) — classes for that year never
+	                    // meet outside it. Falls back to all working days if a year has no mapping.
+	                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? null;
+	                    $class_days = $minor_days ? array_values(array_filter($days, fn($d) => in_array($d['day_id'], $minor_days))) : $days;
 
 	                    if ($is_lab) {
 	                        // --- PLACE LAB (2 consecutive slots) ---
 	                        $best_score = -9999; $best_day = null; $best_idx = null; $best_room = null;
-	                        foreach ($days as $day) {
+	                        foreach ($class_days as $day) {
 	                            $day_id = $day['day_id'];
 	                            for ($i = 0; $i < count($class_slots) - 1; $i++) {
 	                                $s1 = $class_slots[$i]; $s2 = $class_slots[$i + 1];
@@ -145,8 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                $p1 = $faculty_pref_lookup[$faculty_id][$day_id][$s1['slot_id']] ?? 'neutral';
 	                                $p2 = $faculty_pref_lookup[$faculty_id][$day_id][$s2['slot_id']] ?? 'neutral';
 	                                if ($p1 === 'avoid' || $p2 === 'avoid') continue;
-	                                $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
-	                                if (in_array($day_id, $minor_days) && ($s1['slot_number'] == $last_slot_number || $s2['slot_number'] == $last_slot_number)) {
+	                                if (in_array($day_id, $minor_days ?? []) && ($s1['slot_number'] == $last_slot_number || $s2['slot_number'] == $last_slot_number)) {
 	                                    if (!$assignment['is_minor']) continue;
 	                                }
 	                                foreach ($rooms as $room) {
@@ -159,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                    $score += max(0, 20 - abs($room['capacity'] - $class_strength));
 	                                    if ($preferred_slot_id && ($s1['slot_id']==$preferred_slot_id || $s2['slot_id']==$preferred_slot_id)) $score += 100;
 	                                    if ($p1 === 'preferred' || $p2 === 'preferred') $score += 30;
-	                                    if ($assignment['is_minor'] && in_array($day_id, $minor_days)) $score += 200;
+	                                    if ($assignment['is_minor'] && in_array($day_id, $minor_days ?? [])) $score += 200;
 	                                    if ($score > $best_score) { $best_score=$score; $best_day=$day; $best_idx=$i; $best_room=$room; }
 	                                }
 	                            }
@@ -182,7 +188,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                    } else {
 	                        // --- PLACE LECTURE (single slot) ---
 	                        $best_score = -9999; $best_day = null; $best_slot = null; $best_room = null;
-	                        foreach ($days as $day) {
+	                        foreach ($class_days as $day) {
 	                            $day_id = $day['day_id'];
 	                            foreach ($class_slots as $slot) {
 	                                $slot_id = $slot['slot_id'];
@@ -204,8 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                $pref = $faculty_pref_lookup[$faculty_id][$day_id][$slot_id] ?? 'neutral';
 	                                if ($pref === 'avoid') continue;
 	                                $is_last_slot = ($slot['slot_number'] == $last_slot_number);
-	                                $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
-	                                if ($is_last_slot && in_array($day_id, $minor_days)) {
+	                                if ($is_last_slot && in_array($day_id, $minor_days ?? [])) {
 	                                    if (!$assignment['is_minor']) continue;
 	                                    $score = 200;
 	                                } else { $score = 0; }
@@ -277,7 +282,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                    
 	                                    // Try placing the removed session back (it may find a new spot)
 	                                    $removed_ok = false;
-	                                    foreach ($days as $day) {
+	                                    // $removed can belong to a different class than $fa (matched only by
+                                    // shared faculty), so its own class's year decides the allowed days.
+                                    $removed_class = array_filter($classes, fn($c) => $c['class_id'] == $removed['class_id']);
+                                    $removed_year = $removed_class ? reset($removed_class)['year_of_study'] : null;
+                                    $retry_minor_days = $year_minor_days[$removed_year] ?? null;
+	                                    $retry_days = $retry_minor_days ? array_values(array_filter($days, fn($d) => in_array($d['day_id'], $retry_minor_days))) : $days;
+	                                    foreach ($retry_days as $day) {
 	                                        foreach ($class_slots as $slot) {
 	                                            $sid = $slot['slot_id'];
 	                                            if (isset($class_daily_schedule[$removed['class_id']][$day['day_id']][$sid]) ||
@@ -642,13 +653,13 @@ $assignments_with_preferred = count(array_filter($assignments, function($a) { re
                         <div style="margin-top:25px;padding-top:20px;border-top:1px solid #eee;">
                             <p style="color:#888;font-size:13px;margin-bottom:12px;">View the generated timetable:</p>
                             <div class="view-buttons">
-                                <a href="view.php" class="btn btn-purple">
+                                <a href="view.php?source=generated&mode=master" class="btn btn-purple">
                                     <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
                                     Master View
                                 </a>
-                                <a href="view.php?mode=class" class="btn btn-outline">By Class</a>
-                                <a href="view.php?mode=faculty" class="btn btn-outline">By Faculty</a>
-                                <a href="view.php?mode=room" class="btn btn-outline">By Room</a>
+                                <a href="view.php?source=generated&mode=class" class="btn btn-outline">By Class</a>
+                                <a href="view.php?source=generated&mode=faculty" class="btn btn-outline">By Faculty</a>
+                                <a href="view.php?source=generated&mode=room" class="btn btn-outline">By Room</a>
                             </div>
                         </div>
                     <?php endif; ?>

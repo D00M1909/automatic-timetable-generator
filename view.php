@@ -148,7 +148,7 @@ function mode_link(string $source, string $mode): string {
                     <?php endforeach; ?>
                 </div>
 
-                <?php require 'includes/view_official.php'; ?>
+                <?php require $source === 'official' ? 'includes/view_official.php' : 'includes/view_generated.php'; ?>
 
                 <div class="legend">
                     <div class="legend-item"><div class="legend-box" style="background:#e8f5e9;"></div> Lecture</div>
