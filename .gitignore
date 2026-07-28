@@ -17,3 +17,15 @@ Thumbs.db
 
 # Browser test artifacts
 .playwright-mcp/
+
+# Agent-generated handoff/scratch docs — session notes, not project docs
+HANDOFF.md
+CLAUDE_HANDOFF.md
+FACULTY_COURSE_COMBINATIONS.md
+*_HANDOFF.md
+*.original.md
+
+# Source workbook and its import — real staff names and the department's timetable
+*.xls
+*.xlsx
+/data/imported_timetables.json
