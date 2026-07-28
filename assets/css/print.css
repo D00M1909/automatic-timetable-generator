@@ -9,7 +9,7 @@
     color-adjust: exact !important;
 }
 .sidebar, .top-header, .breadcrumb, .view-toggle, .filter-bar,
-.btn, .action-grid, .tabs {
+.btn, .action-grid, .tabs, .source-switch {
     display: none !important;
 }
 body { background: white !important; }

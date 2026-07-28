@@ -4,9 +4,7 @@ require_once 'includes/timetable_data.php';
 
 // Two data sources: the official Excel import, and whatever our scheduler produced in the DB.
 $source = ($_GET['source'] ?? 'official') === 'generated' ? 'generated' : 'official';
-$modes = $source === 'official'
-    ? ['master' => 'Master View (All Classes)', 'class' => 'By Class', 'faculty' => 'By Faculty']
-    : ['master' => 'Master View (All Classes)', 'class' => 'By Class', 'faculty' => 'By Faculty', 'room' => 'By Room'];
+$modes = ['master' => 'Master View (All Classes)', 'class' => 'By Class', 'faculty' => 'By Faculty', 'room' => 'By Room'];
 
 $view_mode = $_GET['mode'] ?? 'master';
 if (!isset($modes[$view_mode])) { $view_mode = 'master'; }
@@ -46,11 +44,34 @@ function mode_link(string $source, string $mode): string {
         .lab-badge { font-size: 10px; color: #2196f3; font-weight: 600; }
         .energy-badge { font-size: 9px; color: #27ae60; background: #d4edda; padding: 1px 4px; border-radius: 2px; display: inline-block; margin-top: 2px; }
 
-        .source-toggle { display: flex; gap: 5px; margin-bottom: 10px; }
-        .view-toggle { display: flex; gap: 5px; margin-bottom: 15px; }
+        /* Source switch: the primary, high-stakes choice (which dataset is on screen) —
+           a segmented control sized and colored to read as more important than the
+           mode tabs beneath it. */
+        .source-switch { display: inline-flex; gap: 4px; background: #f3e5f5; border-radius: 12px; padding: 4px; margin-bottom: 6px; }
+        .source-seg { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 9px; text-decoration: none; color: #6B1B5E; font-size: 14px; font-weight: 600; transition: background .18s ease, color .18s ease, box-shadow .18s ease; }
+        .source-seg:hover { background: rgba(107, 27, 94, 0.08); }
+        .source-seg svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+        .source-seg .seg-text { display: flex; flex-direction: column; line-height: 1.25; text-align: left; }
+        .source-seg .seg-sub { font-size: 11px; font-weight: 500; opacity: .75; }
+        .source-seg.active { background: #6B1B5E; color: white; box-shadow: 0 2px 8px rgba(107, 27, 94, 0.35); }
+        .source-seg.active:hover { background: #6B1B5E; }
+
+        .source-note { display: none; }
+
+        /* Mode tabs: secondary — an underline style keeps them visibly lighter than
+           the filled segmented control above. */
+        .view-toggle { display: flex; gap: 4px; margin: 4px 0 20px; border-bottom: 2px solid #eee; }
+        .view-tab { padding: 9px 16px; text-decoration: none; color: #777; font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color .15s ease, border-color .15s ease; }
+        .view-tab:hover { color: #00897B; }
+        .view-tab.active { color: #00897B; border-bottom-color: #00BFA5; }
+
         .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
         .filter-bar select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 3px; min-width: 220px; font-size: 13px; }
-        .source-note { font-size: 12px; color: #777; margin: -4px 0 14px; }
+
+        @media (max-width: 600px) {
+            .source-switch { flex-direction: column; width: 100%; }
+            .source-seg { justify-content: center; }
+        }
         .schedule-meta { color: #666; margin: -6px 0 18px; font-size: 13px; }
         .course-list { margin-top: 24px; max-width: 700px; }
         .course-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -110,23 +131,24 @@ function mode_link(string $source, string $mode): string {
                     <p>Academic Timetable | <?php echo date('F Y'); ?></p>
                 </div>
 
-                <div class="source-toggle">
-                    <a href="<?php echo mode_link('official', 'master'); ?>" class="btn <?php echo $source === 'official' ? 'btn-success' : ''; ?>">Official Timetable</a>
-                    <a href="<?php echo mode_link('generated', 'master'); ?>" class="btn <?php echo $source === 'generated' ? 'btn-success' : ''; ?>">Generated Timetable</a>
+                <div class="source-switch">
+                    <a href="<?php echo mode_link('official', 'master'); ?>" class="source-seg <?php echo $source === 'official' ? 'active' : ''; ?>">
+                        <svg><use href="#icon-book"/></svg>
+                        <span class="seg-text">Official Timetable<span class="seg-sub">Confirmed class schedule</span></span>
+                    </a>
+                    <a href="<?php echo mode_link('generated', 'master'); ?>" class="source-seg <?php echo $source === 'generated' ? 'active' : ''; ?>">
+                        <svg><use href="#icon-ai"/></svg>
+                        <span class="seg-text">Generated Timetable<span class="seg-sub">Our scheduler's output</span></span>
+                    </a>
                 </div>
-                <p class="source-note">
-                    <?php echo $source === 'official'
-                        ? 'Imported from the timetable department workbook (data/imported_timetables.json).'
-                        : 'Produced by our scheduler and stored in the database.'; ?>
-                </p>
 
                 <div class="view-toggle">
                     <?php foreach ($modes as $mode => $label): ?>
-                        <a href="<?php echo mode_link($source, $mode); ?>" class="btn <?php echo $view_mode === $mode ? 'btn-success' : ''; ?>"><?php echo $label; ?></a>
+                        <a href="<?php echo mode_link($source, $mode); ?>" class="view-tab <?php echo $view_mode === $mode ? 'active' : ''; ?>"><?php echo $label; ?></a>
                     <?php endforeach; ?>
                 </div>
 
-                <?php require $source === 'official' ? 'includes/view_official.php' : 'includes/view_generated.php'; ?>
+                <?php require 'includes/view_official.php'; ?>
 
                 <div class="legend">
                     <div class="legend-item"><div class="legend-box" style="background:#e8f5e9;"></div> Lecture</div>

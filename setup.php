@@ -526,10 +526,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Year Name</th><th>Status</th><th class="text-right">Actions</th></tr>
-                            <?php foreach($years as $row): ?>
+                            <tr><th>#</th><th>Year Name</th><th>Status</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($years as $i => $row): ?>
                             <tr>
-                                <td><?php echo $row['year_id']; ?></td>
+                                <td><?php echo $i + 1; ?></td>
                                 <td><?php echo htmlspecialchars($row['year_name']); ?></td>
                                 <td><span class="badge <?php echo $row['year_status']=='active'?'badge-green':'badge-yellow'; ?>"><?php echo htmlspecialchars($row['year_status']); ?></span></td>
                                 <td class="text-right">
@@ -593,10 +593,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Class</th><th>Code</th><th>Year</th><th>Strength</th><th>Skip Gen</th><th class="text-right">Actions</th></tr>
-                            <?php foreach($classes as $row): ?>
+                            <tr><th>#</th><th>Class</th><th>Code</th><th>Year</th><th>Strength</th><th>Skip Gen</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($classes as $i => $row): ?>
                             <tr>
-                                <td><?php echo $row['class_id']; ?></td>
+                                <td><?php echo $i + 1; ?></td>
                                 <td><?php echo htmlspecialchars($row['class_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['class_code']); ?></td>
                                 <td><?php echo htmlspecialchars($row['year_name']); ?></td>
@@ -669,10 +669,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Name</th><th>Code</th><th>Department</th><th>Max/Day</th><th>Max/Wk</th><th>Assign/Wk</th><th class="text-right">Actions</th></tr>
-                            <?php foreach($faculty as $row): ?>
+                            <tr><th>#</th><th>Name</th><th>Code</th><th>Department</th><th>Max/Day</th><th>Max/Wk</th><th>Assign/Wk</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($faculty as $i => $row): ?>
                             <tr>
-                                <td><?php echo $row['faculty_id']; ?></td>
+                                <td><?php echo $i + 1; ?></td>
                                 <td><?php echo htmlspecialchars($row['faculty_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['faculty_code']); ?></td>
                                 <td><?php echo htmlspecialchars($row['department']); ?></td>
@@ -748,10 +748,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="data-table">
                         <table>
-                            <tr><th>ID</th><th>Name</th><th>Code</th><th>Type</th><th>Minor</th><th>Lec Hrs</th><th>Lab Hrs</th><th class="text-right">Actions</th></tr>
-                            <?php foreach($subjects as $row): ?>
+                            <tr><th>#</th><th>Name</th><th>Code</th><th>Type</th><th>Minor</th><th>Lec Hrs</th><th>Lab Hrs</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($subjects as $i => $row): ?>
                             <tr>
-                                <td><?php echo $row['subject_id']; ?></td>
+                                <td><?php echo $i + 1; ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_code']); ?></td>
                                 <td><span class="badge badge-blue"><?php echo htmlspecialchars($row['subject_type']); ?></span></td>
@@ -864,7 +864,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                         <table>
                             <thead>
                                 <tr>
-                                    <th>ID</th>
+                                    <th>#</th>
                                     <th>Class</th>
                                     <th>Subject</th>
                                     <th>Faculty</th>
@@ -873,9 +873,9 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                 </tr>
                             </thead>
                             <tbody>
-                            <?php foreach($assignments as $row): ?>
+                            <?php foreach($assignments as $i => $row): ?>
                             <tr>
-                                <td><?php echo $row['assignment_id']; ?></td>
+                                <td><?php echo $i + 1; ?></td>
                                 <td><?php echo htmlspecialchars($row['class_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['faculty_name']); ?></td>
@@ -994,10 +994,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             </form>
                             <div class="data-table">
                                 <table>
-                                    <tr><th>ID</th><th>Name</th><th>AC</th><th>Rating</th><th class="text-right">Actions</th></tr>
-                                    <?php foreach($buildings as $row): ?>
+                                    <tr><th>#</th><th>Name</th><th>AC</th><th>Rating</th><th class="text-right">Actions</th></tr>
+                                    <?php foreach($buildings as $i => $row): ?>
                                     <tr>
-                                        <td><?php echo $row['building_id']; ?></td>
+                                        <td><?php echo $i + 1; ?></td>
                                         <td><?php echo htmlspecialchars($row['building_name']); ?></td>
                                         <td><?php echo $row['has_ac'] ? 'Yes' : 'No'; ?></td>
                                         <td><span class="badge badge-purple"><?php echo htmlspecialchars($row['energy_rating']); ?></span></td>
@@ -1053,10 +1053,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             </form>
                             <div class="data-table">
                                 <table>
-                                    <tr><th>ID</th><th>Building</th><th>Room</th><th>Type</th><th>Cap</th><th class="text-right">Actions</th></tr>
-                                    <?php foreach($rooms as $row): ?>
+                                    <tr><th>#</th><th>Building</th><th>Room</th><th>Type</th><th>Cap</th><th class="text-right">Actions</th></tr>
+                                    <?php foreach($rooms as $i => $row): ?>
                                     <tr>
-                                        <td><?php echo $row['room_id']; ?></td>
+                                        <td><?php echo $i + 1; ?></td>
                                         <td><?php echo htmlspecialchars($row['building_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['room_name']); ?></td>
                                         <td><span class="badge badge-blue"><?php echo htmlspecialchars($row['room_type']); ?></span></td>

@@ -70,7 +70,7 @@ try {
     // subject_assignments and timetable rows that reference them (see timetable_db.sql
     // FK definitions); deleting time_slots cascades stale faculty_preferences/
     // faculty_unavailable/time_preferences/room_unavailable set against old slots.
-    foreach (['classes', 'subjects', 'faculty', 'time_slots', 'rooms', 'buildings'] as $t) {
+    foreach (['classes', 'subjects', 'faculty', 'time_slots', 'rooms', 'buildings', 'year_working_days'] as $t) {
         $conn->query("DELETE FROM `$t`");
     }
 
@@ -102,6 +102,17 @@ try {
             "iiss",
             [$year_id, class_year_of_study($name), $name, class_code($name)]
         );
+    }
+
+    // ---- Minor-slot days per year (confirmed by the timetable head): SY -> Mon/Tue/Wed,
+    // TY and BE -> Wed/Thu/Fri. generate.php reserves the last class slot of the day for
+    // minor subjects on these days. ----
+    $day_ids = array_column(db_get_rows($conn, "SELECT day_id, day_name FROM working_days"), 'day_id', 'day_name');
+    $minor_days_by_year = [2 => ['Monday', 'Tuesday', 'Wednesday'], 3 => ['Wednesday', 'Thursday', 'Friday'], 4 => ['Wednesday', 'Thursday', 'Friday']];
+    foreach ($minor_days_by_year as $year_of_study => $day_names) {
+        foreach ($day_names as $day_name) {
+            db_insert($conn, "INSERT INTO year_working_days (year_of_study, day_id) VALUES (?, ?)", "ii", [$year_of_study, $day_ids[$day_name]]);
+        }
     }
 
     // ---- Subjects: group every non-break session by subject_code across all classes ----
@@ -192,6 +203,12 @@ try {
             if (!$fac_counts) { $skipped_no_faculty++; continue; }
             arsort($fac_counts);
             $primary_faculty = array_key_first($fac_counts);
+            // Co-taught cells (initials couldn't narrow a single name) resolve to the
+            // full "A/B/C" list — the schema only stores one faculty per assignment,
+            // so take the first name as the assignment's primary faculty.
+            if (strpos($primary_faculty, '/') !== false) {
+                $primary_faculty = trim(explode('/', $primary_faculty)[0]);
+            }
             $faculty_id = $faculty_ids[$primary_faculty] ?? null;
             if (!$faculty_id) { $skipped_no_faculty++; continue; }
             db_insert(

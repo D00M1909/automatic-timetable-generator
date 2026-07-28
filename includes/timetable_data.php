@@ -210,6 +210,26 @@ function tt_faculty_list(array $schedules): array {
     return array_values($names);
 }
 
+// Excel spells the combined lab two ways; treat them as the same room.
+function tt_normalize_room(string $room): string {
+    $room = trim($room);
+    return preg_match('/^104\s*(?:&|and|-)\s*105$/i', $room) ? '104-105' : $room;
+}
+
+/** Distinct rooms across every imported class, sorted. */
+function tt_room_list(array $schedules): array {
+    $rooms = [];
+    foreach ($schedules as $s) {
+        foreach ($s['sessions'] as $session) {
+            $room = $session['room'] ?? '';
+            if ($room !== '' && empty($session['is_break'])) { $rooms[tt_normalize_room($room)] = true; }
+        }
+    }
+    $rooms = array_keys($rooms);
+    natcasesort($rooms);
+    return array_values($rooms);
+}
+
 /** Ordered list of distinct time slots across the given schedules. */
 function tt_time_slots(array $schedules): array {
     $times = [];
