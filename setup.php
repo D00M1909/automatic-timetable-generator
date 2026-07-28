@@ -7,6 +7,16 @@ if ($check && $check->num_rows == 0) {
     $conn->query("ALTER TABLE classes ADD COLUMN skip_generation TINYINT(1) DEFAULT 0");
 }
 
+// Reject values outside a fixed allowed set (dropdown fields with no server-side check otherwise)
+function require_enum($value, array $allowed, $field_label) {
+    if (!in_array($value, $allowed, true)) {
+        set_flash('error', "Invalid $field_label.");
+        header("Location: setup.php");
+        exit;
+    }
+    return $value;
+}
+
 // ============================
 // HANDLE ALL POST ACTIONS
 // ============================
@@ -16,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add_year') {
         $name = $_POST['year_name'] ?? '';
-        $status = $_POST['year_status'] ?? 'active';
+        $status = require_enum($_POST['year_status'] ?? 'active', ['active', 'inactive'], 'year status');
         db_insert($conn, "INSERT INTO years (year_name, year_status) VALUES (?, ?)", "ss", [$name, $status]);
         audit_log($conn, 'ADD_YEAR', "Added year: $name");
         set_flash('success', 'Year added successfully!');
@@ -25,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'edit_year') {
         $id = intval($_POST['year_id'] ?? 0);
         $name = $_POST['year_name'] ?? '';
-        $status = $_POST['year_status'] ?? 'active';
+        $status = require_enum($_POST['year_status'] ?? 'active', ['active', 'inactive'], 'year status');
         db_execute($conn, "UPDATE years SET year_name=?, year_status=? WHERE year_id=?", "ssi", [$name, $status, $id]);
         audit_log($conn, 'EDIT_YEAR', "Updated year ID: $id");
         set_flash('success', 'Year updated successfully!');
@@ -110,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'add_subject') {
         $name = $_POST['subject_name'] ?? '';
         $code = $_POST['subject_code'] ?? '';
-        $type = $_POST['subject_type'] ?? 'lecture';
+        $type = require_enum($_POST['subject_type'] ?? 'lecture', ['lecture', 'lab', 'both'], 'subject type');
         $lec = intval($_POST['lecture_hours_per_week'] ?? 0);
         $lab = intval($_POST['lab_hours_per_week'] ?? 0);
         $dept = $_POST['department'] ?? '';
@@ -124,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = intval($_POST['subject_id'] ?? 0);
         $name = $_POST['subject_name'] ?? '';
         $code = $_POST['subject_code'] ?? '';
-        $type = $_POST['subject_type'] ?? 'lecture';
+        $type = require_enum($_POST['subject_type'] ?? 'lecture', ['lecture', 'lab', 'both'], 'subject type');
         $lec = intval($_POST['lecture_hours_per_week'] ?? 0);
         $lab = intval($_POST['lab_hours_per_week'] ?? 0);
         $dept = $_POST['department'] ?? '';
@@ -187,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'add_room') {
         $building_id = intval($_POST['building_id'] ?? 0);
         $name = $_POST['room_name'] ?? '';
-        $type = $_POST['room_type'] ?? 'classroom';
+        $type = require_enum($_POST['room_type'] ?? 'classroom', ['classroom', 'lab', 'seminar', 'auditorium'], 'room type');
         $capacity = intval($_POST['capacity'] ?? 0);
         $has_proj = isset($_POST['has_projector']) ? 1 : 0;
         $has_ac = isset($_POST['has_ac']) ? 1 : 0;
@@ -201,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = intval($_POST['room_id'] ?? 0);
         $building_id = intval($_POST['building_id'] ?? 0);
         $name = $_POST['room_name'] ?? '';
-        $type = $_POST['room_type'] ?? 'classroom';
+        $type = require_enum($_POST['room_type'] ?? 'classroom', ['classroom', 'lab', 'seminar', 'auditorium'], 'room type');
         $capacity = intval($_POST['capacity'] ?? 0);
         $has_proj = isset($_POST['has_projector']) ? 1 : 0;
         $has_ac = isset($_POST['has_ac']) ? 1 : 0;
@@ -222,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'add_building') {
         $name = $_POST['building_name'] ?? '';
         $has_ac = isset($_POST['has_ac']) ? 1 : 0;
-        $rating = $_POST['energy_rating'] ?? 'B';
+        $rating = require_enum($_POST['energy_rating'] ?? 'B', ['A', 'B', 'C'], 'energy rating');
         db_insert($conn, "INSERT INTO buildings (building_name, has_ac, energy_rating) VALUES (?, ?, ?)", "sis", [$name, $has_ac, $rating]);
         audit_log($conn, 'ADD_BUILDING', "Added building: $name");
         set_flash('success', 'Building added successfully!');
@@ -232,7 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = intval($_POST['building_id'] ?? 0);
         $name = $_POST['building_name'] ?? '';
         $has_ac = isset($_POST['has_ac']) ? 1 : 0;
-        $rating = $_POST['energy_rating'] ?? 'B';
+        $rating = require_enum($_POST['energy_rating'] ?? 'B', ['A', 'B', 'C'], 'energy rating');
         db_execute($conn, "UPDATE buildings SET building_name=?, has_ac=?, energy_rating=? WHERE building_id=?", "sisi", [$name, $has_ac, $rating, $id]);
         audit_log($conn, 'EDIT_BUILDING', "Updated building ID: $id");
         set_flash('success', 'Building updated successfully!');
@@ -250,7 +260,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $faculty_id = intval($_POST['faculty_id'] ?? 0);
         $day_id = intval($_POST['day_id'] ?? 0);
         $slot_id = intval($_POST['slot_id'] ?? 0);
-        $level = $_POST['preference_level'] ?? 'neutral';
+        $level = require_enum($_POST['preference_level'] ?? 'neutral', ['preferred', 'neutral', 'avoid'], 'preference level');
         db_execute($conn, "INSERT INTO faculty_preferences (faculty_id, day_id, slot_id, preference_level) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE preference_level=?", "iiiss", [$faculty_id, $day_id, $slot_id, $level, $level]);
         audit_log($conn, 'ADD_PREFERENCE', "Set preference for faculty=$faculty_id");
         set_flash('success', 'Preference saved successfully!');
@@ -303,7 +313,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'add_building_preference') {
         $faculty_id = intval($_POST['faculty_id'] ?? 0);
         $building_id = intval($_POST['building_id'] ?? 0);
-        $level = $_POST['preference_level'] ?? 'neutral';
+        $level = require_enum($_POST['preference_level'] ?? 'neutral', ['preferred', 'neutral', 'avoid'], 'preference level');
         db_execute($conn, "INSERT INTO building_preferences (faculty_id, building_id, preference_level) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE preference_level=?", "iiis", [$faculty_id, $building_id, $level, $level]);
         audit_log($conn, 'ADD_BUILDING_PREF', "Set building pref for faculty=$faculty_id");
         set_flash('success', 'Building preference saved!');
@@ -521,7 +531,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <tr>
                                 <td><?php echo $row['year_id']; ?></td>
                                 <td><?php echo htmlspecialchars($row['year_name']); ?></td>
-                                <td><span class="badge <?php echo $row['year_status']=='active'?'badge-green':'badge-yellow'; ?>"><?php echo $row['year_status']; ?></span></td>
+                                <td><span class="badge <?php echo $row['year_status']=='active'?'badge-green':'badge-yellow'; ?>"><?php echo htmlspecialchars($row['year_status']); ?></span></td>
                                 <td class="text-right">
                                     <button type="button" class="action-btn edit" onclick="toggleEdit('year-edit-<?php echo $row['year_id']; ?>')">
                                         <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Edit
@@ -744,7 +754,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                 <td><?php echo $row['subject_id']; ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['subject_code']); ?></td>
-                                <td><span class="badge badge-blue"><?php echo $row['subject_type']; ?></span></td>
+                                <td><span class="badge badge-blue"><?php echo htmlspecialchars($row['subject_type']); ?></span></td>
                                 <td><?php echo $row['is_minor'] ? '<span class="badge badge-green">Minor</span>' : '<span class="badge" style="background:#eee;color:#999;">Core</span>'; ?></td>
                                 <td><?php echo $row['lecture_hours_per_week']; ?></td>
                                 <td><?php echo $row['lab_hours_per_week']; ?></td>
@@ -990,7 +1000,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                         <td><?php echo $row['building_id']; ?></td>
                                         <td><?php echo htmlspecialchars($row['building_name']); ?></td>
                                         <td><?php echo $row['has_ac'] ? 'Yes' : 'No'; ?></td>
-                                        <td><span class="badge badge-purple"><?php echo $row['energy_rating']; ?></span></td>
+                                        <td><span class="badge badge-purple"><?php echo htmlspecialchars($row['energy_rating']); ?></span></td>
                                         <td class="text-right">
                                             <button type="button" class="action-btn edit" onclick="toggleEdit('building-edit-<?php echo $row['building_id']; ?>')">
                                                 <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Edit
@@ -1049,7 +1059,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                         <td><?php echo $row['room_id']; ?></td>
                                         <td><?php echo htmlspecialchars($row['building_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['room_name']); ?></td>
-                                        <td><span class="badge badge-blue"><?php echo $row['room_type']; ?></span></td>
+                                        <td><span class="badge badge-blue"><?php echo htmlspecialchars($row['room_type']); ?></span></td>
                                         <td><?php echo $row['capacity']; ?></td>
                                         <td class="text-right">
                                             <button type="button" class="action-btn edit" onclick="toggleEdit('room-edit-<?php echo $row['room_id']; ?>')">
@@ -1121,10 +1131,10 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                     </form>
                     <div class="preference-grid">
                         <?php foreach($preferences as $row): ?>
-                        <div class="preference-card <?php echo $row['preference_level']; ?>">
+                        <div class="preference-card <?php echo htmlspecialchars($row['preference_level'], ENT_QUOTES); ?>">
                             <div class="card-header">
                                 <span class="faculty-name"><?php echo htmlspecialchars($row['faculty_name']); ?></span>
-                                <span class="badge <?php echo $row['preference_level']=='preferred'?'badge-green':($row['preference_level']=='avoid'?'badge-red':'badge-yellow'); ?>"><?php echo ucfirst($row['preference_level']); ?></span>
+                                <span class="badge <?php echo $row['preference_level']=='preferred'?'badge-green':($row['preference_level']=='avoid'?'badge-red':'badge-yellow'); ?>"><?php echo htmlspecialchars(ucfirst($row['preference_level'])); ?></span>
                             </div>
                             <div class="meta">
                                 <svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg> <?php echo $row['day_name']; ?>
@@ -1257,7 +1267,7 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <tr>
                                 <td><?php echo htmlspecialchars($row['faculty_name']); ?></td>
                                 <td><?php echo htmlspecialchars($row['building_name']); ?></td>
-                                <td><span class="badge <?php echo $row['preference_level']=='preferred'?'badge-green':($row['preference_level']=='avoid'?'badge-red':'badge-yellow'); ?>"><?php echo ucfirst($row['preference_level']); ?></span></td>
+                                <td><span class="badge <?php echo $row['preference_level']=='preferred'?'badge-green':($row['preference_level']=='avoid'?'badge-red':'badge-yellow'); ?>"><?php echo htmlspecialchars(ucfirst($row['preference_level'])); ?></span></td>
                                 <td class="text-right">
                                     <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this preference?');" class="track-form">
                                         <?php csrf_field(); ?>

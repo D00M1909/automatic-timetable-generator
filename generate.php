@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 
                         // --- PLACE LABS (Requires 2 consecutive slots) ---
                         $labs_placed = 0;
-                        while ($labs_placed < $lab_hours) {
+                        while ($labs_placed + 2 <= $lab_hours) {
                             $best_score = -9999;
                             $best_day = null; 
                             $best_idx = null; 
@@ -121,6 +121,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                 for ($i = 0; $i < count($class_slots) - 1; $i++) {
                                     $slot1 = $class_slots[$i];
                                     $slot2 = $class_slots[$i + 1];
+
+                                    // Slots must be physically consecutive (not spanning a break/lunch)
+                                    if ($slot2['slot_number'] - $slot1['slot_number'] != 1) continue;
 
                                     // Check Class Conflicts
                                     if (isset($class_daily_schedule[$class_id][$day_id][$slot1['slot_id']]) || 
@@ -143,20 +146,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 
 	                                    // Minor Subject Last-Slot Constraint (for labs spanning the last slot)
 	                                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
-	                                    if (in_array($day_id, $minor_days)) {
-	                                        if ($slot1['slot_number'] == $last_slot_number || $slot2['slot_number'] == $last_slot_number) {
-	                                            if (!$assignment['is_minor']) continue; // Hard block
-	                                            $score += 200;
-	                                        }
-	                                    }
+	                                    $is_minor_last_slot = in_array($day_id, $minor_days) &&
+	                                        ($slot1['slot_number'] == $last_slot_number || $slot2['slot_number'] == $last_slot_number);
+	                                    if ($is_minor_last_slot && !$assignment['is_minor']) continue; // Hard block
 
 	                                    // Score Rooms (only lab rooms)
                                     foreach ($rooms as $room) {
                                         if ($room['room_type'] !== 'lab' || $room['capacity'] < $class_strength) continue;
-                                        if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) || 
+                                        if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot1['slot_id']]) ||
                                             isset($room_daily_schedule[$room['room_id']][$day_id][$slot2['slot_id']])) continue;
 
                                         $score = 0;
+                                        if ($is_minor_last_slot) $score += 200;
                                         // Energy efficiency bonus
                                         if ($room['has_ac'] || $room['building_ac']) $score += 10;
                                         // Capacity match bonus
@@ -252,10 +253,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                    // Minor subjects MUST go in the last slot on designated days
 	                                    $is_last_slot = ($slot['slot_number'] == $last_slot_number);
 	                                    $minor_days = $year_minor_days[$assignment['year_of_study']] ?? [];
-	                                    if ($is_last_slot && in_array($day_id, $minor_days)) {
-	                                        if (!$assignment['is_minor']) continue; // Hard block
-	                                        $score += 200; // Strong bonus for correct minor placement
-	                                    }
+	                                    $is_minor_last_slot = $is_last_slot && in_array($day_id, $minor_days);
+	                                    if ($is_minor_last_slot && !$assignment['is_minor']) continue; // Hard block
 
 	                                    // Score Rooms (only classrooms for lectures)
                                     foreach ($rooms as $room) {
@@ -263,6 +262,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                                         if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
 
                                         $score = 0;
+                                        if ($is_minor_last_slot) $score += 200; // Strong bonus for correct minor placement
                                         // Building continuity bonus
                                         $prev_building = $class_room_tracking[$class_id][$day_id] ?? null;
                                         if ($prev_building && $prev_building == $room['building_id']) $score += 15;
