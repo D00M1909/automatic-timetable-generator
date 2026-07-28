@@ -32,7 +32,7 @@ assert($c['subject'] === 'Discrete Mathematics & Graph Theory', 'DM&GT: ' . $c['
 $cse_a = $by_name['SY CSE A'];
 $c = cell($cse_a, 'OOP -PKH-001');
 assert($c['subject'] === 'Object Oriented Programming', 'OOP: ' . $c['subject']);
-assert($c['faculty'] === 'Dr Poonamkumar Hanwate', 'OOP faculty: ' . $c['faculty']);
+assert($c['faculty'] === 'Dr. Poonamkumar Hanwate', 'OOP faculty: ' . $c['faculty']);
 
 // Multi-faculty course narrowed by nothing stays as the full list.
 $c = cell($cse_a, 'MDMC-Minor');
@@ -43,6 +43,16 @@ $be_cs = $by_name['BE CS- A'];
 $c = cell($be_cs, 'VAPT - DJ -Online');
 assert($c['room'] === 'Online', 'VAPT room: ' . $c['room']);
 assert($c['faculty'] === 'Ms. Dhanashri Joshi', 'VAPT faculty: ' . $c['faculty']);
+
+// Punctuation/spacing variants of the same name collapse to one canonical spelling.
+assert(tt_canonical_faculty('Dr.Arati Kothari') === 'Dr. Arati Kothari', 'no-space title');
+assert(tt_canonical_faculty('Dr Ayushi Godiya') === 'Dr. Ayushi Godiya', 'no-period title');
+assert(tt_canonical_faculty('Dr. Sudheer Kadam') === 'Dr. Sudhir Kadam', 'aliased spelling');
+assert(tt_canonical_faculty('Dr. MA Ansari') === 'Dr. M A Ansari', 'squashed initials');
+assert(tt_canonical_faculty('Priyanka Patil') === 'Ms. Priyanka Patil', 'missing title');
+$faculty_list = tt_faculty_list($schedules);
+assert(!in_array('Dr Poonamkumar Hanwate', $faculty_list, true), 'stale spelling should not survive: ' . implode(', ', $faculty_list));
+assert(count($faculty_list) === count(array_unique($faculty_list)), 'faculty list has duplicates');
 
 // 12-hour sheet times must sort chronologically, not lexically.
 $times = tt_time_slots($schedules);

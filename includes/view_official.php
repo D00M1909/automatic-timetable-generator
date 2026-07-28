@@ -39,6 +39,11 @@ function official_time_cell(string $time, string $break_label): void {
     if ($break_label !== '') { echo '<div class="break-label">' . htmlspecialchars($break_label) . '</div>'; }
     echo '</td>';
 }
+
+/** Duration comes from the Excel merged-cell height: 1 or 2 timetable slots. */
+function official_duration_slots(?array $session): int {
+    return max(1, (int) ($session['duration_slots'] ?? 1));
+}
 ?>
 
 <?php if (!$schedules): ?>
@@ -64,6 +69,7 @@ function official_time_cell(string $time, string $break_label): void {
     }
     ?>
     <?php foreach ($days as $day): ?>
+        <?php $covered = array_fill_keys($class_names, 0); ?>
         <div class="master-day-section">
             <div class="master-day-title"><?php echo $day; ?></div>
             <div class="timetable-container">
@@ -76,12 +82,22 @@ function official_time_cell(string $time, string $break_label): void {
                     </tr>
                     <?php foreach ($times as $time): ?>
                         <tr>
-                            <?php official_time_cell($time, $breaks[$time] ?? ''); ?>
-                            <?php foreach ($class_names as $name): $session = $master[$day][$time][$name] ?? null; ?>
-                                <td class="<?php echo $session ? 'class-slot' . (!empty($session['is_lab']) ? ' lab' : '') : 'empty-slot'; ?>">
-                                    <?php echo $session ? official_cell($session, 'class') : '--'; ?>
-                                </td>
-                            <?php endforeach; ?>
+                            <?php $break_label = $breaks[$time] ?? ''; official_time_cell($time, $break_label); ?>
+                            <?php if ($break_label !== ''): ?>
+                                <td colspan="<?php echo count($class_names); ?>" class="<?php echo stripos($break_label, 'lunch') !== false ? 'lunch-cell' : 'break-cell'; ?>"><?php echo htmlspecialchars($break_label); ?></td>
+                            <?php else: ?>
+                                <?php foreach ($class_names as $name): ?>
+                                    <?php
+                                    if ($covered[$name] > 0) { $covered[$name]--; continue; }
+                                    $session = $master[$day][$time][$name] ?? null;
+                                    $duration = official_duration_slots($session);
+                                    if ($session && $duration > 1) { $covered[$name] = $duration - 1; }
+                                    ?>
+                                    <td<?php echo $duration > 1 && $session ? ' rowspan="' . $duration . '"' : ''; ?> class="<?php echo $session ? 'class-slot' . (!empty($session['is_lab']) ? ' lab' : '') : 'empty-slot'; ?>">
+                                        <?php echo $session ? official_cell($session, 'class') : '--'; ?>
+                                    </td>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
                 </table>
@@ -119,6 +135,7 @@ function official_time_cell(string $time, string $break_label): void {
                 $grid[$time][$session['day']][] = $session;
             }
         }
+        $covered = array_fill_keys($days, 0);
         ?>
         <h2 style="margin:0 0 12px;color:#6B1B5E;"><?php echo htmlspecialchars($selected_key); ?></h2>
         <div class="timetable-container">
@@ -126,15 +143,25 @@ function official_time_cell(string $time, string $break_label): void {
                 <tr><th style="min-width:150px;">Time Slot</th><?php foreach ($days as $day): ?><th><?php echo $day; ?></th><?php endforeach; ?></tr>
                 <?php foreach ($times as $time): ?>
                     <tr>
-                        <?php official_time_cell($time, $breaks[$time] ?? ''); ?>
-                        <?php foreach ($days as $day): $items = $grid[$time][$day] ?? []; ?>
-                            <td class="<?php echo $items ? 'class-slot' : 'empty-slot'; ?>">
+                        <?php $break_label = $breaks[$time] ?? ''; official_time_cell($time, $break_label); ?>
+                        <?php if ($break_label !== ''): ?>
+                            <td colspan="<?php echo count($days); ?>" class="<?php echo stripos($break_label, 'lunch') !== false ? 'lunch-cell' : 'break-cell'; ?>"><?php echo htmlspecialchars($break_label); ?></td>
+                        <?php else: ?>
+                            <?php foreach ($days as $day): ?>
                                 <?php
-                                if (!$items) { echo '--'; }
-                                foreach ($items as $session) { echo official_cell($session, 'faculty'); }
+                                if ($covered[$day] > 0) { $covered[$day]--; continue; }
+                                $items = $grid[$time][$day] ?? [];
+                                $duration = count($items) === 1 ? official_duration_slots($items[0]) : 1;
+                                if ($duration > 1) { $covered[$day] = $duration - 1; }
                                 ?>
-                            </td>
-                        <?php endforeach; ?>
+                                <td<?php echo $duration > 1 ? ' rowspan="' . $duration . '"' : ''; ?> class="<?php echo $items ? 'class-slot' . (!empty($items[0]['is_lab']) ? ' lab' : '') : 'empty-slot'; ?>">
+                                    <?php
+                                    if (!$items) { echo '--'; }
+                                    foreach ($items as $session) { echo official_cell($session, 'faculty'); }
+                                    ?>
+                                </td>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
             </table>
@@ -165,7 +192,7 @@ function official_time_cell(string $time, string $break_label): void {
     <?php if (!$selected): ?>
         <div class="no-data"><h3>Select a class to view its timetable</h3></div>
     <?php else: ?>
-        <?php $grid = official_grid($selected); $times = tt_time_slots([$selected]); ?>
+        <?php $grid = official_grid($selected); $times = tt_time_slots([$selected]); $covered = array_fill_keys($days, 0); ?>
         <h2 style="margin:0 0 5px;color:#6B1B5E;"><?php echo htmlspecialchars($selected['class_name']); ?></h2>
         <p class="schedule-meta">
             <?php echo htmlspecialchars($selected['program'] ?? ''); ?>
@@ -179,11 +206,21 @@ function official_time_cell(string $time, string $break_label): void {
                 <?php foreach ($times as $time): $break_label = tt_break_label($grid, $time); ?>
                     <tr>
                         <?php official_time_cell($time, $break_label); ?>
-                        <?php foreach ($days as $day): $session = $break_label === '' ? ($grid[$time][$day] ?? null) : null; ?>
-                            <td class="<?php echo $session ? 'class-slot' . (!empty($session['is_lab']) ? ' lab' : '') : 'empty-slot'; ?>">
-                                <?php echo $session ? official_cell($session, 'class') : '--'; ?>
-                            </td>
-                        <?php endforeach; ?>
+                        <?php if ($break_label !== ''): ?>
+                            <td colspan="<?php echo count($days); ?>" class="<?php echo stripos($break_label, 'lunch') !== false ? 'lunch-cell' : 'break-cell'; ?>"><?php echo htmlspecialchars($break_label); ?></td>
+                        <?php else: ?>
+                            <?php foreach ($days as $day): ?>
+                                <?php
+                                if ($covered[$day] > 0) { $covered[$day]--; continue; }
+                                $session = $grid[$time][$day] ?? null;
+                                $duration = official_duration_slots($session);
+                                if ($session && $duration > 1) { $covered[$day] = $duration - 1; }
+                                ?>
+                                <td<?php echo $duration > 1 && $session ? ' rowspan="' . $duration . '"' : ''; ?> class="<?php echo $session ? 'class-slot' . (!empty($session['is_lab']) ? ' lab' : '') : 'empty-slot'; ?>">
+                                    <?php echo $session ? official_cell($session, 'class') : '--'; ?>
+                                </td>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
             </table>

@@ -50,20 +50,27 @@ try {
         if ($headers.Count -eq 0) { continue }
 
         $sessions = @()
+        $timeSlots = @()
         for ($row = $headerRow + 1; $row -le $headerRow + 17; $row += 2) {
             $time = Get-CellText $sheet $row 1
             if (-not $time) { continue }
+            $timeSlots += $time
 
             foreach ($column in $headers.Keys) {
-                $entry = Get-CellText $sheet $row $column
+                $cell = $sheet.Cells.Item($row, $column)
+                $entry = ([string]$cell.Text).Trim()
                 if (-not $entry) { continue }
 
                 $isBreak = $entry -match '(?i)break|lunch'
+                # A timetable hour occupies a time row plus its following "Room no." row.
+                # Excel merges four rows for a two-hour activity and two rows for a one-hour activity.
+                $durationSlots = [Math]::Max(1, [int]($cell.MergeArea.Rows.Count / 2))
                 $sessions += [PSCustomObject]@{
                     day = $headers[$column]
                     time = $time
                     entry = $entry
                     is_break = $isBreak
+                    duration_slots = $durationSlots
                 }
             }
         }
@@ -85,6 +92,7 @@ try {
             program = (Get-CellText $sheet 6 3) -replace '(?i)^program name\s*:\s*', ''
             semester = (Get-CellText $sheet 7 3) -replace '(?i)^semester\s*:\s*', ''
             effective_from = Get-CellText $sheet 6 5
+            time_slots = $timeSlots
             sessions = $sessions
             course_faculty = $courseMap
         }

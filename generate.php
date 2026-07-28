@@ -63,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
                 $class_daily_schedule = [];
                 $faculty_daily_schedule = [];
                 $room_daily_schedule = [];
+                $online_room_ids = array_column(array_filter($rooms, function($r) { return $r['room_name'] === 'Online'; }), 'room_id');
                 $class_room_tracking = []; 
                 $errors = [];
                 $lab_errors = [];
@@ -146,8 +147,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                }
 	                                foreach ($rooms as $room) {
 	                                    if ($room['room_type'] !== 'lab') continue;
-	                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$s1['slot_id']]) ||
-	                                        isset($room_daily_schedule[$room['room_id']][$day_id][$s2['slot_id']])) continue;
+	                                    $is_online = in_array($room['room_id'], $online_room_ids, true);
+	                                    if (!$is_online && (isset($room_daily_schedule[$room['room_id']][$day_id][$s1['slot_id']]) ||
+	                                        isset($room_daily_schedule[$room['room_id']][$day_id][$s2['slot_id']]))) continue;
 	                                    $score = 5;
 	                                    if ($room['has_ac']) $score += 5;
 	                                    $score += max(0, 20 - abs($room['capacity'] - $class_strength));
@@ -164,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                $placed_sessions[] = ['class_id'=>$class_id,'day_id'=>$day_id,'slot_id'=>$slot['slot_id'],'room_id'=>$best_room['room_id'],'subject_id'=>$subject_id,'faculty_id'=>$faculty_id,'assignment_id'=>$assignment_id,'is_lab'=>1,'energy_score'=>$best_score];
 	                                $class_daily_schedule[$class_id][$day_id][$slot['slot_id']] = $subject_id;
 	                                $faculty_daily_schedule[$faculty_id][$day_id][$slot['slot_id']] = true;
-	                                $room_daily_schedule[$best_room['room_id']][$day_id][$slot['slot_id']] = true;
+	                                if (!in_array($best_room['room_id'], $online_room_ids, true)) { $room_daily_schedule[$best_room['room_id']][$day_id][$slot['slot_id']] = true; }
 	                                $faculty_daily_hours[$faculty_id][$day_id] = ($faculty_daily_hours[$faculty_id][$day_id]??0) + 1;
 	                                $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id]??0) + 1;
 	                            }
@@ -198,8 +200,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                    $score = 200;
 	                                } else { $score = 0; }
 	                                foreach ($rooms as $room) {
-	                                    if ($room['room_type']==='lab' || $room['capacity']<$class_strength) continue;
-	                                    if (isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
+	                                    if ($room['capacity']<$class_strength) continue;
+	                                    $is_online = in_array($room['room_id'], $online_room_ids, true);
+	                                    if (!$is_online && isset($room_daily_schedule[$room['room_id']][$day_id][$slot_id])) continue;
 	                                    $s = $score;
 	                                    $prev = $class_room_tracking[$class_id][$day_id] ?? null;
 	                                    if ($prev && $prev==$room['building_id']) $s += 15;
@@ -215,7 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                            $placed_sessions[] = ['class_id'=>$class_id,'day_id'=>$best_day['day_id'],'slot_id'=>$best_slot['slot_id'],'room_id'=>$best_room['room_id'],'subject_id'=>$subject_id,'faculty_id'=>$faculty_id,'assignment_id'=>$assignment_id,'is_lab'=>0,'energy_score'=>$best_score];
 	                            $class_daily_schedule[$class_id][$best_day['day_id']][$best_slot['slot_id']] = $subject_id;
 	                            $faculty_daily_schedule[$faculty_id][$best_day['day_id']][$best_slot['slot_id']] = true;
-	                            $room_daily_schedule[$best_room['room_id']][$best_day['day_id']][$best_slot['slot_id']] = true;
+	                            if (!in_array($best_room['room_id'], $online_room_ids, true)) { $room_daily_schedule[$best_room['room_id']][$best_day['day_id']][$best_slot['slot_id']] = true; }
 	                            $faculty_daily_hours[$faculty_id][$best_day['day_id']] = ($faculty_daily_hours[$faculty_id][$best_day['day_id']]??0) + 1;
 	                            $faculty_weekly_hours[$faculty_id] = ($faculty_weekly_hours[$faculty_id]??0) + 1;
 	                            $class_room_tracking[$class_id][$best_day['day_id']] = $best_room['building_id'];
@@ -268,7 +271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                            if (isset($class_daily_schedule[$removed['class_id']][$day['day_id']][$sid]) ||
 	                                                isset($faculty_daily_schedule[$fac_id][$day['day_id']][$sid])) continue;
 	                                            foreach ($rooms as $room) {
-	                                                if (isset($room_daily_schedule[$room['room_id']][$day['day_id']][$sid])) continue;
+	                                                if (!in_array($room['room_id'], $online_room_ids, true) && isset($room_daily_schedule[$room['room_id']][$day['day_id']][$sid])) continue;
 	                                                // Place it back
 	                                                $placed_sessions[] = [
 	                                                    'class_id' => $removed['class_id'], 'day_id' => $day['day_id'], 'slot_id' => $sid,
@@ -278,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                                ];
 	                                                $class_daily_schedule[$removed['class_id']][$day['day_id']][$sid] = $removed['subject_id'];
 	                                                $faculty_daily_schedule[$fac_id][$day['day_id']][$sid] = true;
-	                                                $room_daily_schedule[$room['room_id']][$day['day_id']][$sid] = true;
+	                                                if (!in_array($room['room_id'], $online_room_ids, true)) { $room_daily_schedule[$room['room_id']][$day['day_id']][$sid] = true; }
 	                                                $faculty_daily_hours[$fac_id][$day['day_id']] = ($faculty_daily_hours[$fac_id][$day['day_id']] ?? 0) + 1;
 	                                                $faculty_weekly_hours[$fac_id] = ($faculty_weekly_hours[$fac_id] ?? 0) + 1;
 	                                                $removed_ok = true;
@@ -295,7 +298,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                        $placed_sessions[$remove_idx] = $removed;
 	                                        $class_daily_schedule[$removed['class_id']][$removed['day_id']][$removed['slot_id']] = $removed['subject_id'];
 	                                        $faculty_daily_schedule[$removed['faculty_id']][$removed['day_id']][$removed['slot_id']] = true;
-	                                        $room_daily_schedule[$removed['room_id']][$removed['day_id']][$removed['slot_id']] = true;
+	                                        if (!in_array($removed['room_id'], $online_room_ids, true)) { $room_daily_schedule[$removed['room_id']][$removed['day_id']][$removed['slot_id']] = true; }
 	                                        $faculty_daily_hours[$removed['faculty_id']][$removed['day_id']] = ($faculty_daily_hours[$removed['faculty_id']][$removed['day_id']] ?? 0) + 1;
 	                                        $faculty_weekly_hours[$removed['faculty_id']] = ($faculty_weekly_hours[$removed['faculty_id']] ?? 0) + 1;
 	                                    }

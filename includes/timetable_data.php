@@ -7,6 +7,33 @@
 
 const TT_STOPWORDS = ['of', 'the', 'and', 'with', 'to', 'from', 'another', 'program', 'using', 'in', 'for', 'a', 'an'];
 
+// Sheets spell the same person's name two ways somewhere in the workbook; map the minority
+// spelling to the majority one so both views (and the DB clone) show one name per person.
+const TT_FACULTY_ALIASES = [
+    'kavita kushwah' => 'Kavita Kaushwah',
+    'sudheer kadam' => 'Sudhir Kadam',
+    'm a ansari' => 'M A Ansari',
+    'ma ansari' => 'M A Ansari',
+];
+
+// Sheets sometimes drop the title entirely for a name that has one everywhere else.
+const TT_FACULTY_BARE_ALIASES = [
+    'priyanka patil' => 'Ms. Priyanka Patil',
+];
+
+/** "Dr.Arati Kothari" / "Dr Arati Kothari" / "Dr. Arati Kothari" -> one spelling. */
+function tt_canonical_faculty(string $name): string {
+    $name = trim(preg_replace('/\s+/', ' ', $name));
+    if ($name === '') { return $name; }
+    if (!preg_match('/^(Dr|Mr|Mrs|Ms|Prof)\.?\s*(.*)$/i', $name, $m)) {
+        return TT_FACULTY_BARE_ALIASES[strtolower($name)] ?? $name;
+    }
+    $title = ucfirst(strtolower($m[1]));
+    $rest = trim($m[2]);
+    $rest = TT_FACULTY_ALIASES[strtolower($rest)] ?? $rest;
+    return $rest === '' ? $name : "$title. $rest";
+}
+
 function tt_load(?string $path = null): array {
     static $cache = null;
     if ($cache !== null) { return $cache; }
@@ -40,9 +67,11 @@ function tt_prepare_courses(array $course_faculty): array {
         $plain = preg_replace('/\([^)]*\)/', ' ', $course);
         $words = preg_split('/[^A-Za-z0-9]+/', $plain, -1, PREG_SPLIT_NO_EMPTY);
         $significant = array_values(array_filter($words, static fn($w) => !in_array(strtolower($w), TT_STOPWORDS, true)));
+        $faculty_raw = trim(preg_replace('/\s+/', ' ', (string) ($item['faculty'] ?? '')));
+        $faculty = implode('/', array_map(static fn($p) => tt_canonical_faculty(trim($p)), explode('/', $faculty_raw)));
         $out[] = [
             'course' => $course,
-            'faculty' => trim(preg_replace('/\s+/', ' ', (string) ($item['faculty'] ?? ''))),
+            'faculty' => $faculty,
             'bracket' => $bracket,
             'acronym' => tt_acronym($significant),
             'acronym_all' => tt_acronym($words),
@@ -185,6 +214,10 @@ function tt_faculty_list(array $schedules): array {
 function tt_time_slots(array $schedules): array {
     $times = [];
     foreach ($schedules as $s) {
+        foreach (($s['time_slots'] ?? []) as $time) {
+            $time = trim((string) $time);
+            if ($time !== '' && !in_array($time, $times, true)) { $times[] = $time; }
+        }
         foreach ($s['sessions'] as $session) {
             $time = $session['time'] ?? '';
             if ($time !== '' && !in_array($time, $times, true)) { $times[] = $time; }
