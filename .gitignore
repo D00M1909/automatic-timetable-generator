@@ -12,5 +12,8 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Claude Code local config, agents, and session state
+.claude/
+
 # Browser test artifacts
 .playwright-mcp/

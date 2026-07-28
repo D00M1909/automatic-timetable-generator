@@ -60,11 +60,16 @@ function db_query($conn, $sql, $types = "", $params = []) {
         return false;
     }
     if ($types && $params) {
-        $stmt->bind_param($types, ...$params);
+        if (!$stmt->bind_param($types, ...$params)) {
+            error_log("Bind failed: " . $stmt->error);
+            $stmt->close();
+            return false;
+        }
     }
-    $stmt->execute();
-    if ($stmt->error) {
+    if (!$stmt->execute()) {
         error_log("Execute failed: " . $stmt->error);
+        $stmt->close();
+        return false;
     }
     return $stmt;
 }
@@ -129,22 +134,6 @@ function get_flash() {
         return $flash;
     }
     return null;
-}
-
-// ==========================================
-// SYSTEM CONFIG
-// ==========================================
-
-function get_config($conn, $key, $default = '') {
-    $row = db_get_row($conn, "SELECT config_value FROM system_config WHERE config_key = ?", "s", [$key]);
-    return $row ? $row['config_value'] : $default;
-}
-
-function set_config($conn, $key, $value) {
-    db_execute($conn, 
-        "INSERT INTO system_config (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = ?",
-        "sss", [$key, $value, $value]
-    );
 }
 
 // ==========================================
@@ -232,5 +221,4 @@ function flash_message() {
 function common_styles() {
     echo '<link rel="stylesheet" href="assets/css/style.css">';
     echo '<link rel="stylesheet" href="assets/css/print.css" media="print">';
-    echo '<script src="assets/js/script.js" defer></script>';
 }

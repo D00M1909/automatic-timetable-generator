@@ -92,7 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                    foreach ($ca as $a) {
 	                        $lh = $a['subject_type'] === 'lecture' ? 0 : $a['lab_hours_per_week'];
 	                        $leh = $a['subject_type'] === 'lab' ? 0 : $a['lecture_hours_per_week'];
-	                        for ($i = 0; $i < $lh; $i += 2) $all_sessions[] = ['type'=>'lab','a'=>$a,'c'=>$class];
+	                        // $i + 2 <= $lh, not $i < $lh: an odd lab_hours_per_week must not round up to a whole extra 2-slot block
+	                        for ($i = 0; $i + 2 <= $lh; $i += 2) $all_sessions[] = ['type'=>'lab','a'=>$a,'c'=>$class];
 	                        for ($i = 0; $i < $leh; $i++) $all_sessions[] = ['type'=>'lecture','a'=>$a,'c'=>$class];
 	                    }
 	                }
@@ -127,6 +128,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                            $day_id = $day['day_id'];
 	                            for ($i = 0; $i < count($class_slots) - 1; $i++) {
 	                                $s1 = $class_slots[$i]; $s2 = $class_slots[$i + 1];
+                                // $class_slots excludes breaks/lunch, so array-adjacent != actually consecutive
+	                                if ($s2['slot_number'] - $s1['slot_number'] != 1) continue;
 	                                if (isset($class_daily_schedule[$class_id][$day_id][$s1['slot_id']]) ||
 	                                    isset($class_daily_schedule[$class_id][$day_id][$s2['slot_id']])) continue;
 	                                if (isset($faculty_daily_schedule[$faculty_id][$day_id][$s1['slot_id']]) ||

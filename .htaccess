@@ -1,0 +1,5 @@
+# Block HTTP access to SQL dumps sitting in the webroot.
+# .gitignore keeps timetable_db.sql out of git; it does nothing about Apache.
+<FilesMatch "\.sql$">
+    Require all denied
+</FilesMatch>
