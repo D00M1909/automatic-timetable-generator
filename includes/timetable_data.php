@@ -210,6 +210,24 @@ function tt_faculty_list(array $schedules): array {
     return array_values($names);
 }
 
+// Study year lives in the class-name prefix ("SY CSE A", "TY-SE-A", "BE CS- A") in both
+// the Excel import and the DB; the `years` table is the academic year (2026-27), not this.
+const TT_YEAR_LABELS = ['FY' => 'First Year', 'SY' => 'Second Year', 'TY' => 'Third Year', 'BE' => 'Final Year'];
+
+function tt_year_code(string $class_name): string {
+    return preg_match('/^\s*(FY|SY|TY|BE)\b/i', $class_name, $m) ? strtoupper($m[1]) : '';
+}
+
+function tt_year_label(string $code): string {
+    return TT_YEAR_LABELS[$code] ?? $code;
+}
+
+/** Year codes present in the given class names, in study order. */
+function tt_year_list(array $class_names): array {
+    $found = array_filter(array_map('tt_year_code', $class_names));
+    return array_values(array_intersect(array_keys(TT_YEAR_LABELS), $found));
+}
+
 // Excel spells the combined lab two ways; treat them as the same room.
 function tt_normalize_room(string $room): string {
     $room = trim($room);

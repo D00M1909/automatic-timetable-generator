@@ -4,7 +4,14 @@ require_once 'includes/timetable_data.php';
 
 // Two data sources: the official Excel import, and whatever our scheduler produced in the DB.
 $source = ($_GET['source'] ?? 'official') === 'generated' ? 'generated' : 'official';
-$modes = ['master' => 'Master View (All Classes)', 'class' => 'By Class', 'faculty' => 'By Faculty', 'room' => 'By Room'];
+$modes = [
+    'master' => 'Master View (All Classes)',
+    'year' => 'By Year',
+    'class' => 'By Class',
+    'faculty' => 'By Faculty',
+    'all_faculty' => 'All Faculty',
+    'room' => 'By Room',
+];
 
 $view_mode = $_GET['mode'] ?? 'master';
 if (!isset($modes[$view_mode])) { $view_mode = 'master'; }
@@ -98,6 +105,10 @@ function mode_link(string $source, string $mode): string {
         .master-empty { text-align: center; padding: 60px 20px; color: #888; }
         .master-empty h3 { color: #6B1B5E; margin-bottom: 10px; }
 
+        .year-title { font-size: 20px; font-weight: 700; color: #6B1B5E; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 2px solid #e8d5f0; }
+        .year-title:first-child { margin-top: 0; }
+        .year-title .year-sub { font-size: 12px; font-weight: 500; color: #888; margin-left: 8px; }
+
         @media print {
             /* The source switch is chrome, not data — never print it. Declared here
                (last in the cascade) so it wins regardless of print.css load order. */
@@ -119,6 +130,11 @@ function mode_link(string $source, string $mode): string {
                 break-after: auto;
             }
             .master-day-title { page-break-after: avoid; background: #f3e5f5 !important; -webkit-print-color-adjust: exact; }
+            /* The preceding day section already forced a break, so a year heading
+               starts its own page — it only needs to stay glued to its first day. */
+            .year-title { page-break-after: avoid; break-after: avoid; margin-top: 0; }
+            /* The dropdown that picked the year/faculty is chrome, not data. */
+            .filter-bar { display: none !important; }
             .master-grid { font-size: 9px; }
             .master-grid td { height: auto; padding: 3px; }
         }
