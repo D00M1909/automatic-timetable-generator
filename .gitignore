@@ -1,4 +1,4 @@
-# Local database config with passwords (root only — NOT includes/)
+# Local database config with passwords
 /config.php
 
 # Full database dump (contains real data) — use schema-only file instead
@@ -8,17 +8,14 @@ timetable_db.sql
 .DS_Store
 Thumbs.db
 
-# IDE files
+# IDE and tool files
 .idea/
 .vscode/
-
-# Claude Code local config, agents, and session state
 .claude/
-
-# Browser test artifacts
+.impeccable/
 .playwright-mcp/
 
-# Agent-generated handoff/scratch docs — session notes, not project docs
+# Scratch docs and session notes
 HANDOFF.md
 CLAUDE_HANDOFF.md
 FACULTY_COURSE_COMBINATIONS.md
