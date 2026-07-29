@@ -11,16 +11,6 @@ Thumbs.db
 # IDE and tool files
 .idea/
 .vscode/
-.claude/
-.impeccable/
-.playwright-mcp/
-
-# Scratch docs and session notes
-HANDOFF.md
-CLAUDE_HANDOFF.md
-FACULTY_COURSE_COMBINATIONS.md
-*_HANDOFF.md
-*.original.md
 
 # Source workbook and its import — real staff names and the department's timetable
 *.xls
