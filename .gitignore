@@ -11,6 +11,8 @@ Thumbs.db
 # IDE and tool files
 .idea/
 .vscode/
+.claude/
+.tokensave/
 
 # Source workbook and its import — real staff names and the department's timetable
 *.xls
