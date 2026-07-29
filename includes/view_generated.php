@@ -221,6 +221,26 @@ function pdf_export_link($mode, $id) {
                             </table>
                         </div>
 
+                        <?php if ($view_mode === 'class'): ?>
+                            <?php
+                            $course_faculty = [];
+                            foreach ($rows as $row) {
+                                if (empty($row['subject_name'])) { continue; }
+                                $course_faculty[$row['subject_name'] . '|' . $row['faculty_name']] = [$row['subject_name'], $row['faculty_name'] ?? ''];
+                            }
+                            ksort($course_faculty);
+                            ?>
+                            <?php if ($course_faculty): ?>
+                                <div class="course-list">
+                                    <h3 style="color:#6B1B5E;">Course &amp; Faculty</h3>
+                                    <table><tr><th>Course</th><th>Faculty</th></tr>
+                                        <?php foreach ($course_faculty as [$course, $fac]): ?>
+                                            <tr><td><?php echo htmlspecialchars($course); ?></td><td><?php echo htmlspecialchars($fac); ?></td></tr>
+                                        <?php endforeach; ?>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        <?php endif; ?>
 
                     <?php elseif ($selected_id > 0): ?>
                         <div class="no-data">

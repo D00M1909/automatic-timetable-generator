@@ -31,8 +31,6 @@ body { background: white !important; }
 }
 table {
     page-break-inside: auto !important;
-    width: 100% !important;
-    max-width: 100% !important;
 }
 tr {
     page-break-inside: avoid !important;
@@ -45,6 +43,9 @@ td, th {
 .timetable-grid td {
     height: auto !important;
     padding: 6px 4px !important;
+}
+.timetable-container {
+    transform-origin: top left !important;
 }
 .print-header {
     display: block !important;

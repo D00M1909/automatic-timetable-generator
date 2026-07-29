@@ -44,9 +44,6 @@ function mode_link(string $source, string $mode): string {
         .lab-badge { font-size: 10px; color: #2196f3; font-weight: 600; }
         .energy-badge { font-size: 9px; color: #27ae60; background: #d4edda; padding: 1px 4px; border-radius: 2px; display: inline-block; margin-top: 2px; }
 
-        /* Source switch: the primary, high-stakes choice (which dataset is on screen) —
-           a segmented control sized and colored to read as more important than the
-           mode tabs beneath it. */
         .source-switch { display: inline-flex; gap: 4px; background: #f3e5f5; border-radius: 12px; padding: 4px; margin-bottom: 6px; }
         .source-seg { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 9px; text-decoration: none; color: #6B1B5E; font-size: 14px; font-weight: 600; transition: background .18s ease, color .18s ease, box-shadow .18s ease; }
         .source-seg:hover { background: rgba(107, 27, 94, 0.08); }
@@ -56,22 +53,19 @@ function mode_link(string $source, string $mode): string {
         .source-seg.active { background: #6B1B5E; color: white; box-shadow: 0 2px 8px rgba(107, 27, 94, 0.35); }
         .source-seg.active:hover { background: #6B1B5E; }
 
-        .source-note { display: none; }
-
-        /* Mode tabs: secondary — an underline style keeps them visibly lighter than
-           the filled segmented control above. */
         .view-toggle { display: flex; gap: 4px; margin: 4px 0 20px; border-bottom: 2px solid #eee; }
         .view-tab { padding: 9px 16px; text-decoration: none; color: #777; font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color .15s ease, border-color .15s ease; }
         .view-tab:hover { color: #00897B; }
         .view-tab.active { color: #00897B; border-bottom-color: #00BFA5; }
 
-        .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
-        .filter-bar select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 3px; min-width: 220px; font-size: 13px; }
-
         @media (max-width: 600px) {
             .source-switch { flex-direction: column; width: 100%; }
             .source-seg { justify-content: center; }
         }
+
+        .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+        .filter-bar select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 3px; min-width: 220px; font-size: 13px; }
+
         .schedule-meta { color: #666; margin: -6px 0 18px; font-size: 13px; }
         .course-list { margin-top: 24px; max-width: 700px; }
         .course-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -105,10 +99,28 @@ function mode_link(string $source, string $mode): string {
         .master-empty h3 { color: #6B1B5E; margin-bottom: 10px; }
 
         @media print {
-            .master-day-section { page-break-inside: avoid; margin-bottom: 15px; }
+            /* The source switch is chrome, not data — never print it. Declared here
+               (last in the cascade) so it wins regardless of print.css load order. */
+            .source-switch, .source-seg { display: none !important; }
+
+            /* One day per page. fitPrintTables() scales each day down to the page
+               width, so a day now fits a single page and the break is clean rather
+               than letting rows spill onto the next one. */
+            .master-day-section {
+                page-break-after: always;
+                break-after: page;
+                page-break-inside: avoid;
+                break-inside: avoid;
+                margin-bottom: 0;
+            }
+            /* Without this the trailing break emits a blank final page. */
+            .master-day-section:last-of-type {
+                page-break-after: auto;
+                break-after: auto;
+            }
+            .master-day-title { page-break-after: avoid; background: #f3e5f5 !important; -webkit-print-color-adjust: exact; }
             .master-grid { font-size: 9px; }
             .master-grid td { height: auto; padding: 3px; }
-            .master-day-title { background: #f3e5f5 !important; -webkit-print-color-adjust: exact; }
         }
     </style>
 </head>
@@ -159,5 +171,43 @@ function mode_link(string $source, string $mode): string {
             </div>
         </div>
     </div>
+    <script>
+        // The grid is wider than the page, so the print output clips whatever the user
+        // would have to scroll to see. Shrink each table with a transform (which keeps
+        // column proportions, unlike table-layout:fixed) so the full width fits.
+        // A4 landscape minus 10mm margins is ~277mm of printable width.
+        const PRINT_WIDTH_PX = 277 / 25.4 * 96;
+        // A4 landscape height (210mm) less 10mm margins and ~25mm for the day title,
+        // so a scaled day still fits one page. A day that overflows the page height
+        // gets dropped outright by break-inside:avoid — that's why Friday vanished.
+        const PRINT_HEIGHT_PX = 155 / 25.4 * 96;
+
+        function fitPrintTables() {
+            document.querySelectorAll('.timetable-container').forEach(el => {
+                const table = el.querySelector('table');
+                if (!table) return;
+                const width = table.scrollWidth;
+                const height = table.scrollHeight;
+                if (!width) return;
+                const scale = Math.min(1, PRINT_WIDTH_PX / width, PRINT_HEIGHT_PX / height);
+                el.style.transform = 'scale(' + scale + ')';
+                el.style.transformOrigin = 'top left';
+                // A transform doesn't shrink the space the element reserves, so the
+                // page would keep a tall gap under it — clamp the height to match.
+                el.style.height = (height * scale) + 'px';
+            });
+        }
+
+        function resetPrintTables() {
+            document.querySelectorAll('.timetable-container').forEach(el => {
+                el.style.transform = '';
+                el.style.transformOrigin = '';
+                el.style.height = '';
+            });
+        }
+
+        window.addEventListener('beforeprint', fitPrintTables);
+        window.addEventListener('afterprint', resetPrintTables);
+    </script>
 </body>
 </html>
