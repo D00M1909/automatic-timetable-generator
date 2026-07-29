@@ -99,7 +99,13 @@ function tt_resolve(string $entry, array $courses, bool $is_break = false): arra
 
     // Room is the trailing token: a number, a number range, or "Online".
     $room = '';
-    if (preg_match('/(?:^|[-\s])(Online|\d{2,3}(?:\s*(?:-|&|and)\s*\d{2,3})?)\s*(?:lab)?\s*$/i', $text, $m)) {
+    // "Online Mode" (any casing) is a venue, not part of the subject — strip it first so the
+    // code chunk stays clean for cells that write it without a separating hyphen.
+    if (preg_match('/[-\s]*\bonline(\s*mode)?\s*$/i', $text)) {
+        $text = trim(preg_replace('/[-\s]*\bonline(\s*mode)?\s*$/i', '', $text), " -_\t");
+        $room = 'Online';
+    }
+    if ($room === '' && preg_match('/(?:^|[-\s])(Online|\d{2,3}(?:\s*(?:-|&|and)\s*\d{2,3})?)\s*(?:lab)?\s*$/i', $text, $m)) {
         $room = trim($m[1]);
         $text = trim(substr($text, 0, strrpos($text, $m[1])), " -_\t");
     }
@@ -113,6 +119,10 @@ function tt_resolve(string $entry, array $courses, bool $is_break = false): arra
         $initials = strtoupper($chunks[1]);
     }
     if ($code === '') { return $blank + ['room' => $room, 'is_lab' => $is_lab]; }
+
+    // Some sheets write "MDMC Minor" where others write "MDMC-Minor" or plain "MDMC": drop the
+    // trailing qualifier so every spelling keys to the same subject_code.
+    $code = trim(preg_replace('/\s+(minor|mode)\s*$/i', '', $code));
 
     $best = null;
     $best_score = 0;

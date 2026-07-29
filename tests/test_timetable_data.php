@@ -44,6 +44,23 @@ $c = cell($be_cs, 'VAPT - DJ -Online');
 assert($c['room'] === 'Online', 'VAPT room: ' . $c['room']);
 assert($c['faculty'] === 'Ms. Dhanashri Joshi', 'VAPT faculty: ' . $c['faculty']);
 
+// "Online Mode" is the same room, however the sheet spells the cell around it, and the
+// subject_code must not absorb the venue or a trailing "Minor"/"Mode" qualifier.
+$courses = tt_prepare_courses($cse_a['course_faculty'] ?? []);
+foreach ([
+    'MDMC Lab Online Mode' => ['MDMC', 'Online', true],
+    'MDMC Minor Online Mode' => ['MDMC', 'Online', false],
+    'MDMC-Minor Online Mode' => ['MDMC', 'Online', false],
+    'MDMC - Lab Online Mode' => ['MDMC', 'Online', true],
+    'Mini Project Online MOde' => ['MINI PROJECT', 'Online', false],
+    'MDMC-Minor' => ['MDMC', '', false],
+] as $entry => [$code, $room, $lab]) {
+    $r = tt_resolve($entry, $courses);
+    assert($r['subject_code'] === $code, "$entry code: {$r['subject_code']}");
+    assert($r['room'] === $room, "$entry room: {$r['room']}");
+    assert($r['is_lab'] === $lab, "$entry lab");
+}
+
 // Punctuation/spacing variants of the same name collapse to one canonical spelling.
 assert(tt_canonical_faculty('Dr.Arati Kothari') === 'Dr. Arati Kothari', 'no-space title');
 assert(tt_canonical_faculty('Dr Ayushi Godiya') === 'Dr. Ayushi Godiya', 'no-period title');

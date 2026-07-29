@@ -1,5 +1,5 @@
 param(
-    [string]$WorkbookPath = (Join-Path $PSScriptRoot '2-3-4 years_SOE_Odd term_AY_26-27_CSE_AIDS AND CS.xls'),
+    [string]$WorkbookPath = (Join-Path $PSScriptRoot '2-3-4 years_SOE_Odd term_AY_26-27_CSE_AIDS AND CS (1).xls'),
     [string]$OutputPath = (Join-Path $PSScriptRoot 'data\imported_timetables.json'),
     [string]$FacultyCourseOutputPath = (Join-Path $PSScriptRoot 'FACULTY_COURSE_COMBINATIONS.md')
 )
