@@ -109,6 +109,10 @@ function mode_link(string $source, string $mode): string {
         .year-title:first-child { margin-top: 0; }
         .year-title .year-sub { font-size: 12px; font-weight: 500; color: #888; margin-left: 8px; }
 
+        /* Also in print.css — inline so a cached stylesheet can't leave the saved
+           PDF sideways. Bare `landscape` makes Chrome rotate the content instead. */
+        @page { size: A4 landscape; margin: 10mm; }
+
         @media print {
             /* The source switch is chrome, not data — never print it. Declared here
                (last in the cascade) so it wins regardless of print.css load order. */
@@ -137,6 +141,20 @@ function mode_link(string $source, string $mode): string {
             .filter-bar { display: none !important; }
             .master-grid { font-size: 9px; }
             .master-grid td { height: auto; padding: 3px; }
+
+            /* Also in print.css — repeated inline so a cached stylesheet can't
+               reintroduce the split Course & Faculty table. */
+            .course-list {
+                page-break-before: always !important;
+                break-before: page !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                margin-top: 0 !important;
+            }
+            .course-list table, .course-list tbody {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+            }
         }
     </style>
 </head>
@@ -151,7 +169,7 @@ function mode_link(string $source, string $mode): string {
         <div class="content-box">
             <div class="content-box-header">
                 <span>View Timetable</span>
-                <button class="btn btn-print" onclick="window.print()"><svg><use href="#icon-print"/></svg> Print</button>
+                <button class="btn btn-print" onclick="printPage()"><svg><use href="#icon-print"/></svg> Print</button>
             </div>
             <div class="content-box-body">
                 <div class="print-header">
@@ -197,28 +215,76 @@ function mode_link(string $source, string $mode): string {
         // so a scaled day still fits one page. A day that overflows the page height
         // gets dropped outright by break-inside:avoid — that's why Friday vanished.
         const PRINT_HEIGHT_PX = 155 / 25.4 * 96;
+        // A4 landscape (210mm) less the 10mm @page margins — the real page box.
+        const PAGE_HEIGHT_PX = 190 / 25.4 * 96;
+
+        // Chrome seeds the "Save as PDF" filename from document.title, snapshotted
+        // when print() is called — so printPage() sets it before printing rather
+        // than in the beforeprint handler, which runs too late to be picked up.
+        const PRINT_TITLE = <?php echo json_encode(preg_replace('/[\\\\\/:*?"<>|]+/', '-', ($print_doc_title ?? 'Timetable') . ' - ' . date('M Y'))); ?>;
+        let savedTitle = '';
+
+        function printPage() {
+            savedTitle = document.title;
+            document.title = PRINT_TITLE;
+            window.print();
+            document.title = savedTitle;
+        }
+
+        /**
+         * Height the grid may occupy. Multi-container views (master, year) put one
+         * day per page, so they keep the flat budget. Single-grid views (class,
+         * faculty, room) share their page with the header, title and legend — those
+         * are measured so the grid is scaled to leave room, instead of pushing the
+         * legend onto a second page.
+         */
+        function printHeightBudget(el, single) {
+            if (!single) return PRINT_HEIGHT_PX;
+            let used = 0;
+            document.querySelectorAll('.print-header, .schedule-meta, .legend, .content-box-body > h2')
+                .forEach(node => { used += node.offsetHeight || 0; });
+            // Sibling headings inside the view partial (class name, faculty name).
+            const heading = el.parentElement && el.parentElement.querySelector('h2');
+            if (heading) used += heading.offsetHeight || 0;
+            return Math.max(200, PAGE_HEIGHT_PX - used - 24);
+        }
 
         function fitPrintTables() {
-            document.querySelectorAll('.timetable-container').forEach(el => {
+            const containers = document.querySelectorAll('.timetable-container');
+            const single = containers.length === 1;
+            containers.forEach(el => {
                 const table = el.querySelector('table');
                 if (!table) return;
+                // The table is width:100% of the container, so its own natural width
+                // is only measurable with the stretch removed. Needed both to scale a
+                // narrow grid UP into the empty page space and to centre it.
+                table.style.width = 'auto';
                 const width = table.scrollWidth;
                 const height = table.scrollHeight;
-                if (!width) return;
-                const scale = Math.min(1, PRINT_WIDTH_PX / width, PRINT_HEIGHT_PX / height);
+                if (!width || !height) { table.style.width = ''; return; }
+                // No upper clamp: a small grid (e.g. one class, 5 days) grows until it
+                // hits the page width or height, whichever binds first.
+                const scale = Math.min(PRINT_WIDTH_PX / width, printHeightBudget(el, single) / height);
+                // Shrink the box to the table and scale from the top-left, so the grid
+                // stays flush with the left margin like the rest of the page content.
+                el.style.width = width + 'px';
                 el.style.transform = 'scale(' + scale + ')';
                 el.style.transformOrigin = 'top left';
-                // A transform doesn't shrink the space the element reserves, so the
-                // page would keep a tall gap under it — clamp the height to match.
+                // A transform doesn't change the space the element reserves, so the
+                // page would keep a gap under it — clamp the height to match.
                 el.style.height = (height * scale) + 'px';
             });
         }
 
         function resetPrintTables() {
             document.querySelectorAll('.timetable-container').forEach(el => {
+                const table = el.querySelector('table');
+                if (table) table.style.width = '';
                 el.style.transform = '';
                 el.style.transformOrigin = '';
                 el.style.height = '';
+                el.style.width = '';
+                el.style.margin = '';
             });
         }
 

@@ -219,6 +219,13 @@ function flash_message() {
 }
 
 function common_styles() {
-    echo '<link rel="stylesheet" href="assets/css/style.css">';
-    echo '<link rel="stylesheet" href="assets/css/print.css" media="print">';
+    // Version by mtime: without it the browser keeps serving a stale print.css
+    // and CSS edits silently don't reach the printed output.
+    echo '<link rel="stylesheet" href="assets/css/style.css?v=' . asset_version('assets/css/style.css') . '">';
+    echo '<link rel="stylesheet" href="assets/css/print.css?v=' . asset_version('assets/css/print.css') . '" media="print">';
+}
+
+function asset_version(string $relative): string {
+    $path = __DIR__ . '/../' . $relative;
+    return is_file($path) ? (string) filemtime($path) : '1';
 }

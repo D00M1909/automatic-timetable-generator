@@ -1,6 +1,8 @@
 /* Print styles - loaded via media="print" */
 @page {
-    size: landscape;
+    /* Name the paper too — the bare `landscape` keyword makes Chrome emit a
+       portrait page with rotated content, so the saved PDF opens sideways. */
+    size: A4 landscape;
     margin: 10mm;
 }
 * {
@@ -29,8 +31,30 @@ body { background: white !important; }
 .timetable-container, div[style*="overflow-x"] {
     overflow: visible !important;
 }
+/* Nothing splits across a page: a block that doesn't fit moves to the next page
+   whole. fitPrintTables() scales each grid to the page box, so "avoid" here can
+   always be honoured rather than silently dropping content. */
 table {
-    page-break-inside: auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+}
+/* The grid is scaled to fill its page, so the course list never has room left
+   beside it. Chrome also ignores break-inside:avoid on a table that starts mid
+   page — force the list onto its own page rather than hoping it fits. */
+.course-list {
+    page-break-before: always !important;
+    break-before: page !important;
+    margin-top: 0 !important;
+}
+.timetable-container, .course-list, .legend, .master-day-section,
+.schedule-meta, .print-header {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+}
+/* Headings stay glued to the block they label. */
+h2, h3, .master-day-title, .year-title {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
 }
 tr {
     page-break-inside: avoid !important;

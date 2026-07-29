@@ -239,6 +239,7 @@ function official_person_table(array $grid, array $days, array $times, array $br
         $breaks = [];
         $times = tt_time_slots($schedules);
         $grid = official_faculty_grid($schedules, $selected_key, $breaks);
+        $print_doc_title = $selected_key . ' Timetable';
         ?>
         <h2 style="margin:0 0 12px;color:#6B1B5E;"><?php echo htmlspecialchars($selected_key); ?></h2>
         <?php official_person_table($grid, $days, $times, $breaks, 'faculty'); ?>
@@ -274,6 +275,7 @@ function official_person_table(array $grid, array $days, array $times, array $br
                 $grid[$time][$session['day']][] = $session;
             }
         }
+        $print_doc_title = 'Room ' . $selected_key . ' Timetable';
         ?>
         <h2 style="margin:0 0 12px;color:#6B1B5E;"><?php echo htmlspecialchars($selected_key); ?></h2>
         <?php official_person_table($grid, $days, $times, $breaks, 'room'); ?>
@@ -303,7 +305,13 @@ function official_person_table(array $grid, array $days, array $times, array $br
     <?php if (!$selected): ?>
         <div class="no-data"><h3>Select a class to view its timetable</h3></div>
     <?php else: ?>
-        <?php $grid = official_grid($selected); $times = tt_time_slots([$selected]); $covered = array_fill_keys($days, 0); ?>
+        <?php
+        $grid = official_grid($selected);
+        $times = tt_time_slots([$selected]);
+        $covered = array_fill_keys($days, 0);
+        // Read by view.php's print script to name the saved PDF.
+        $print_doc_title = $selected['class_name'] . ' Timetable';
+        ?>
         <h2 style="margin:0 0 5px;color:#6B1B5E;"><?php echo htmlspecialchars($selected['class_name']); ?></h2>
         <p class="schedule-meta">
             <?php echo htmlspecialchars($selected['program'] ?? ''); ?>
