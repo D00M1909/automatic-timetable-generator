@@ -1,5 +1,5 @@
 param(
-    [string]$WorkbookPath = (Join-Path $PSScriptRoot '2-3-4 years_SOE_Odd term_AY_26-27_CSE_AIDS AND CS (1).xls'),
+    [string]$WorkbookPath = (Join-Path $PSScriptRoot '2-3-4 years_SOE_Odd term_AY_26-27_CSE_AIDS AND CS (TY UPDATE).xls'),
     [string]$OutputPath = (Join-Path $PSScriptRoot 'data\imported_timetables.json'),
     [string]$FacultyCourseOutputPath = (Join-Path $PSScriptRoot 'FACULTY_COURSE_COMBINATIONS.md')
 )
@@ -84,8 +84,20 @@ try {
             }
         }
 
-        $className = (Get-CellText $sheet 7 4) -replace '(?i)^class\s*:\s*', ''
-        if (-not $className) { $className = $sheet.Name }
+        # Class name normally sits in D7 as "Class : BE AIDS B". One sheet in the TY-update
+        # workbook had that cell overwritten with the W.E.F date, so only trust a cell that
+        # actually carries the "Class :" label; otherwise scan the header block for one, and
+        # fall back to the sheet name ("BE-AIDS B" -> "BE AIDS B") as a last resort.
+        $className = ''
+        foreach ($cell in @(@(7, 4), @(7, 3), @(7, 5), @(6, 4), @(8, 4))) {
+            $text = Get-CellText $sheet $cell[0] $cell[1]
+            if ($text -match '(?i)^class\s*:\s*(.+)$') { $className = $Matches[1].Trim(); break }
+        }
+        if (-not $className) {
+            $className = ($sheet.Name -replace '[-_]+', ' ') -replace '\s+', ' '
+            $className = $className.Trim()
+            Write-Warning "Sheet '$($sheet.Name)': no 'Class :' header cell found; using sheet name '$className'."
+        }
         $schedules += [PSCustomObject]@{
             id = Get-SafeFileName $className
             class_name = $className

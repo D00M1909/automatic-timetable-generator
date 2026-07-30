@@ -26,6 +26,8 @@ const ROOM_TYPES = [
     '101' => 'lab', '102' => 'lab', '103' => 'lab',
     '104-105' => 'lab', '106' => 'lab', '107' => 'lab', '108' => 'classroom',
     '109' => 'classroom', '110' => 'classroom',
+    // ULC-1 wing rooms, introduced by the TY-update workbook ("... - ULC 1- 205").
+    '201' => 'lab', '205' => 'classroom',
     'Online' => 'lab',
 ];
 

@@ -112,6 +112,18 @@ function tt_resolve(string $entry, array $courses, bool $is_break = false): arra
 
     $body = trim(preg_replace('/\b(lab|laboratory)\b/i', ' ', $text), " -_\t");
     $chunks = array_values(array_filter(array_map('trim', preg_split('/[-_]+/', $body)), static fn($c) => $c !== ''));
+    // A few cells put the room in the middle instead of at the end ("CN Lab -101-SK"):
+    // if no trailing room was found, take a purely numeric chunk after the code as the room.
+    if ($room === '') {
+        foreach (array_slice(array_keys($chunks), 1) as $i) {
+            if (preg_match('/^\d{2,3}(?:\s*(?:-|&|and)\s*\d{2,3})?$/', $chunks[$i])) {
+                $room = $chunks[$i];
+                array_splice($chunks, $i, 1);
+                break;
+            }
+        }
+    }
+
     $code = $chunks[0] ?? '';
     // Second chunk is faculty initials only when it looks like initials (short, no spaces).
     $initials = '';
