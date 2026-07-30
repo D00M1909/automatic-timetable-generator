@@ -72,12 +72,14 @@ function official_master_day(string $day, array $class_names, array $master, arr
         <div class="master-day-title"><?php echo htmlspecialchars($day); ?></div>
         <div class="timetable-container">
             <table class="master-grid">
+                <thead>
                 <tr>
                     <th class="time-header">Time Slot</th>
                     <?php foreach ($class_names as $name): ?>
                         <th class="class-header"><?php echo htmlspecialchars($name); ?></th>
                     <?php endforeach; ?>
                 </tr>
+                </thead>
                 <?php foreach ($times as $time): ?>
                     <tr>
                         <?php $break_label = $breaks[$time] ?? ''; official_time_cell($time, $break_label); ?>
@@ -126,7 +128,7 @@ function official_person_table(array $grid, array $days, array $times, array $br
     ?>
     <div class="timetable-container">
         <table class="timetable-grid">
-            <tr><th style="min-width:150px;">Time Slot</th><?php foreach ($days as $day): ?><th><?php echo $day; ?></th><?php endforeach; ?></tr>
+            <thead><tr><th style="min-width:150px;">Time Slot</th><?php foreach ($days as $day): ?><th><?php echo $day; ?></th><?php endforeach; ?></tr></thead>
             <?php foreach ($times as $time): ?>
                 <tr>
                     <?php $break_label = $breaks[$time] ?? ''; official_time_cell($time, $break_label); ?>
@@ -321,7 +323,7 @@ function official_person_table(array $grid, array $days, array $times, array $br
 
         <div class="timetable-container">
             <table class="timetable-grid">
-                <tr><th style="min-width:150px;">Time Slot</th><?php foreach ($days as $day): ?><th><?php echo $day; ?></th><?php endforeach; ?></tr>
+                <thead><tr><th style="min-width:150px;">Time Slot</th><?php foreach ($days as $day): ?><th><?php echo $day; ?></th><?php endforeach; ?></tr></thead>
                 <?php foreach ($times as $time): $break_label = tt_break_label($grid, $time); ?>
                     <tr>
                         <?php official_time_cell($time, $break_label); ?>

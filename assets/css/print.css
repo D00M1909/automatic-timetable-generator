@@ -31,12 +31,30 @@ body { background: white !important; }
 .timetable-container, div[style*="overflow-x"] {
     overflow: visible !important;
 }
-/* Nothing splits across a page: a block that doesn't fit moves to the next page
-   whole. fitPrintTables() scales each grid to the page box, so "avoid" here can
-   always be honoured rather than silently dropping content. */
+/* Grids span the full printable width instead of hugging their content: fixed
+   layout divides the page evenly between the columns, which is both why the
+   output no longer wastes two thirds of the page horizontally and why no table
+   needs measuring or scaling in JS. */
+.timetable-grid, .master-grid {
+    width: 100% !important;
+    table-layout: fixed !important;
+    /* min-width from the screen styles would otherwise force an overflow. */
+    min-width: 0 !important;
+}
+.timetable-grid td, .timetable-grid th,
+.master-grid td, .master-grid th {
+    min-width: 0 !important;
+    overflow-wrap: break-word !important;
+}
+/* A table taller than the page continues on the next one with its header
+   repeated. "break-inside: avoid" here would instead push the whole table to a
+   fresh page and leave the previous one blank. */
 table {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+}
+thead {
+    display: table-header-group !important;
 }
 /* The grid is scaled to fill its page, so the course list never has room left
    beside it. Chrome also ignores break-inside:avoid on a table that starts mid
@@ -46,10 +64,22 @@ table {
     break-before: page !important;
     margin-top: 0 !important;
 }
-.timetable-container, .course-list, .legend, .master-day-section,
-.schedule-meta, .print-header {
+.course-list, .schedule-meta {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+}
+/* The day/faculty heading is a page title in print — it does not need the screen
+   layout's generous banner, and the space it saves keeps a busy grid on one page. */
+.master-day-title {
+    font-size: 11pt !important;
+    padding: 1.5pt 4pt !important;
+    margin-bottom: 2pt !important;
+    line-height: 1.2 !important;
+}
+.year-title {
+    font-size: 14pt !important;
+    margin-bottom: 3pt !important;
+    padding-bottom: 2pt !important;
 }
 /* Headings stay glued to the block they label. */
 h2, h3, .master-day-title, .year-title {
@@ -64,15 +94,82 @@ td, th {
     page-break-inside: avoid !important;
     word-wrap: break-word !important;
 }
-.timetable-grid td {
+/* Type sizes in points, since the page is measured in mm and not pixels. The
+   master grid carries one column per class (21 of them), so it needs the
+   smallest type; a single class or faculty grid has six columns and can breathe. */
+.timetable-grid {
+    font-size: 8pt !important;
+}
+.timetable-grid td, .timetable-grid th {
     height: auto !important;
-    padding: 6px 4px !important;
+    padding: 2pt !important;
+    line-height: 1.15 !important;
 }
-.timetable-container {
-    transform-origin: top left !important;
-}
-.print-header {
+.timetable-grid .subject-name { font-size: 8pt !important; }
+.timetable-grid .faculty-name, .timetable-grid .class-name { font-size: 7pt !important; }
+.timetable-grid .room-name, .timetable-grid .lab-badge { font-size: 6.5pt !important; }
+
+/* 21 class columns over ~277mm leaves ~12mm each, so the master grid is tuned to
+   keep a day on one page: text small, padding minimal, faculty names allowed to
+   wrap tightly. */
+.master-grid { font-size: 5.5pt !important; }
+.master-grid td, .master-grid th { padding: 1.5pt 1pt !important; line-height: 1.15 !important; }
+.master-grid th.class-header { font-size: 5pt !important; }
+.master-grid .subject-name { font-size: 5.5pt !important; }
+.master-grid .faculty-name, .master-grid .class-name { font-size: 5pt !important; }
+.master-grid .room-name, .master-grid .lab-badge { font-size: 4.5pt !important; }
+.master-grid .time-cell { font-size: 5.5pt !important; padding-left: 2pt !important; }
+/* Cover page: names the exported view and carries the legend, so page one is the
+   title page rather than the near-empty sheet a too-tall first section left. */
+.print-cover {
     display: block !important;
+    page-break-after: always !important;
+    break-after: page !important;
     text-align: center;
-    margin-bottom: 20px;
+    padding-top: 45mm;
+}
+.print-cover h1 {
+    font-size: 24pt;
+    color: #6B1B5E !important;
+    margin: 0 0 4mm;
+}
+.print-cover .cover-sub {
+    font-size: 12pt;
+    color: #555 !important;
+    margin: 0 0 14mm;
+}
+.print-cover .cover-meta {
+    width: auto !important;
+    margin: 0 auto 14mm;
+    border-collapse: collapse;
+    font-size: 11pt;
+}
+.print-cover .cover-meta th,
+.print-cover .cover-meta td {
+    /* The grid header styles are teal-filled; the cover is not a data table. */
+    background: none !important;
+    border: none !important;
+    padding: 2mm 5mm;
+    text-align: left;
+}
+.print-cover .cover-meta th {
+    color: #6B1B5E !important;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.print-cover .cover-legend {
+    display: flex;
+    justify-content: center;
+    gap: 10mm;
+    font-size: 10pt;
+}
+.print-cover .cover-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 2mm;
+}
+/* The on-screen legend is reproduced on the cover — printing it again after the
+   last grid is what pushed it onto a page of its own. */
+.legend {
+    display: none !important;
 }

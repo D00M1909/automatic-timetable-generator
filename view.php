@@ -82,7 +82,7 @@ function mode_link(string $source, string $mode): string {
         .legend-item { display: flex; align-items: center; gap: 6px; }
         .legend-box { width: 16px; height: 16px; border: 1px solid #ddd; }
         .no-data { text-align: center; padding: 50px 20px; color: #777; }
-        .print-header { display: none; }
+        .print-header, .print-cover { display: none; }
 
         .master-grid { width: 100%; border-collapse: collapse; font-size: 11px; border: 1px solid #ddd; }
         .master-grid th { background: #6B1B5E; color: white; padding: 8px 4px; text-align: center; font-weight: 600; border: 1px solid #5a1850; font-size: 11px; }
@@ -118,29 +118,28 @@ function mode_link(string $source, string $mode): string {
                (last in the cascade) so it wins regardless of print.css load order. */
             .source-switch, .source-seg { display: none !important; }
 
-            /* One day per page. fitPrintTables() scales each day down to the page
-               width, so a day now fits a single page and the break is clean rather
-               than letting rows spill onto the next one. */
+            /* One section per page, started by a break *before* rather than after, so
+               there is no trailing break to emit a blank final page. break-inside is
+               left at auto deliberately: "avoid" on a section taller than the page made
+               Chrome push the whole thing to the next page, which is what left the first
+               page holding nothing but the title. */
             .master-day-section {
-                page-break-after: always;
-                break-after: page;
-                page-break-inside: avoid;
-                break-inside: avoid;
+                page-break-before: always;
+                break-before: page;
                 margin-bottom: 0;
             }
-            /* Without this the trailing break emits a blank final page. */
-            .master-day-section:last-of-type {
-                page-break-after: auto;
-                break-after: auto;
-            }
             .master-day-title { page-break-after: avoid; background: #f3e5f5 !important; -webkit-print-color-adjust: exact; }
-            /* The preceding day section already forced a break, so a year heading
-               starts its own page — it only needs to stay glued to its first day. */
+            /* A year heading owns the page its first day starts. Without the second
+               rule the heading's own page-break-before would leave it alone on a
+               page, with the first day pushed to the next one. */
             .year-title { page-break-after: avoid; break-after: avoid; margin-top: 0; }
+            .year-title + .master-day-section {
+                page-break-before: avoid !important;
+                break-before: avoid !important;
+            }
             /* The dropdown that picked the year/faculty is chrome, not data. */
             .filter-bar { display: none !important; }
-            .master-grid { font-size: 9px; }
-            .master-grid td { height: auto; padding: 3px; }
+            .master-grid td { height: auto; padding: 3px 2px; }
 
             /* Also in print.css — repeated inline so a cached stylesheet can't
                reintroduce the split Course & Faculty table. */
@@ -172,9 +171,35 @@ function mode_link(string $source, string $mode): string {
                 <button class="btn btn-print" onclick="printPage()"><svg><use href="#icon-print"/></svg> Print</button>
             </div>
             <div class="content-box-body">
-                <div class="print-header">
-                    <h2>Ajeenkya DY Patil University</h2>
-                    <p>Academic Timetable | <?php echo date('F Y'); ?></p>
+                <?php
+                // Print-only cover page. It names exactly which view was exported and
+                // carries the legend, so the first page is the document's title page
+                // instead of the near-empty one a tall first section used to leave.
+                $cover_rows = [
+                    'View' => $modes[$view_mode],
+                    'Source' => $source === 'official' ? 'Official timetable (as confirmed by the department)' : 'Generated timetable (scheduler output)',
+                ];
+                if ($view_mode === 'year' && $selected_key !== '') {
+                    $cover_rows['Year'] = tt_year_label($selected_key) . ' (' . $selected_key . ')';
+                } elseif ($selected_key !== '') {
+                    $cover_rows[$view_mode === 'room' ? 'Room' : ($view_mode === 'faculty' ? 'Faculty' : 'Class')] = $selected_key;
+                }
+                $cover_rows['Exported'] = date('d M Y, g:i a');
+                ?>
+                <div class="print-cover">
+                    <h1>Ajeenkya DY Patil University</h1>
+                    <p class="cover-sub">School of Engineering &mdash; Academic Timetable</p>
+                    <table class="cover-meta">
+                        <?php foreach ($cover_rows as $label => $value): ?>
+                            <tr><th><?php echo htmlspecialchars($label); ?></th><td><?php echo htmlspecialchars($value); ?></td></tr>
+                        <?php endforeach; ?>
+                    </table>
+                    <div class="cover-legend">
+                        <div class="legend-item"><div class="legend-box" style="background:#e8f5e9;"></div> Lecture</div>
+                        <div class="legend-item"><div class="legend-box" style="background:#e3f2fd;border:2px solid #2196f3;"></div> Lab</div>
+                        <div class="legend-item"><div class="legend-box" style="background:#fff8e1;"></div> Short Break</div>
+                        <div class="legend-item"><div class="legend-box" style="background:#ffecb3;"></div> Lunch Break</div>
+                    </div>
                 </div>
 
                 <div class="source-switch">
@@ -206,17 +231,13 @@ function mode_link(string $source, string $mode): string {
         </div>
     </div>
     <script>
-        // The grid is wider than the page, so the print output clips whatever the user
-        // would have to scroll to see. Shrink each table with a transform (which keeps
-        // column proportions, unlike table-layout:fixed) so the full width fits.
-        // A4 landscape minus 10mm margins is ~277mm of printable width.
-        const PRINT_WIDTH_PX = 277 / 25.4 * 96;
-        // A4 landscape height (210mm) less 10mm margins and ~25mm for the day title,
-        // so a scaled day still fits one page. A day that overflows the page height
-        // gets dropped outright by break-inside:avoid — that's why Friday vanished.
-        const PRINT_HEIGHT_PX = 155 / 25.4 * 96;
-        // A4 landscape (210mm) less the 10mm @page margins — the real page box.
-        const PAGE_HEIGHT_PX = 190 / 25.4 * 96;
+        // Print layout is pure CSS: the grids are sized by `table-layout: fixed` at the
+        // full printable width. An earlier version measured each table and shrank it with
+        // `transform: scale()`, but a transform does not affect layout — the reserved box
+        // never matched the painted table, so tall grids bled over the next section's
+        // heading, and shrink-to-content left the grids using a fraction of the page
+        // width. Doing it in CSS also means headless `--print-to-pdf`, which never fires
+        // beforeprint, produces the same output as the Print button.
 
         // Chrome seeds the "Save as PDF" filename from document.title, snapshotted
         // when print() is called — so printPage() sets it before printing rather
@@ -231,65 +252,6 @@ function mode_link(string $source, string $mode): string {
             document.title = savedTitle;
         }
 
-        /**
-         * Height the grid may occupy. Multi-container views (master, year) put one
-         * day per page, so they keep the flat budget. Single-grid views (class,
-         * faculty, room) share their page with the header, title and legend — those
-         * are measured so the grid is scaled to leave room, instead of pushing the
-         * legend onto a second page.
-         */
-        function printHeightBudget(el, single) {
-            if (!single) return PRINT_HEIGHT_PX;
-            let used = 0;
-            document.querySelectorAll('.print-header, .schedule-meta, .legend, .content-box-body > h2')
-                .forEach(node => { used += node.offsetHeight || 0; });
-            // Sibling headings inside the view partial (class name, faculty name).
-            const heading = el.parentElement && el.parentElement.querySelector('h2');
-            if (heading) used += heading.offsetHeight || 0;
-            return Math.max(200, PAGE_HEIGHT_PX - used - 24);
-        }
-
-        function fitPrintTables() {
-            const containers = document.querySelectorAll('.timetable-container');
-            const single = containers.length === 1;
-            containers.forEach(el => {
-                const table = el.querySelector('table');
-                if (!table) return;
-                // The table is width:100% of the container, so its own natural width
-                // is only measurable with the stretch removed. Needed both to scale a
-                // narrow grid UP into the empty page space and to centre it.
-                table.style.width = 'auto';
-                const width = table.scrollWidth;
-                const height = table.scrollHeight;
-                if (!width || !height) { table.style.width = ''; return; }
-                // No upper clamp: a small grid (e.g. one class, 5 days) grows until it
-                // hits the page width or height, whichever binds first.
-                const scale = Math.min(PRINT_WIDTH_PX / width, printHeightBudget(el, single) / height);
-                // Shrink the box to the table and scale from the top-left, so the grid
-                // stays flush with the left margin like the rest of the page content.
-                el.style.width = width + 'px';
-                el.style.transform = 'scale(' + scale + ')';
-                el.style.transformOrigin = 'top left';
-                // A transform doesn't change the space the element reserves, so the
-                // page would keep a gap under it — clamp the height to match.
-                el.style.height = (height * scale) + 'px';
-            });
-        }
-
-        function resetPrintTables() {
-            document.querySelectorAll('.timetable-container').forEach(el => {
-                const table = el.querySelector('table');
-                if (table) table.style.width = '';
-                el.style.transform = '';
-                el.style.transformOrigin = '';
-                el.style.height = '';
-                el.style.width = '';
-                el.style.margin = '';
-            });
-        }
-
-        window.addEventListener('beforeprint', fitPrintTables);
-        window.addEventListener('afterprint', resetPrintTables);
     </script>
 </body>
 </html>
