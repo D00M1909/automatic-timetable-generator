@@ -211,12 +211,14 @@ function mode_link(string $source, string $mode): string {
         // column proportions, unlike table-layout:fixed) so the full width fits.
         // A4 landscape minus 10mm margins is ~277mm of printable width.
         const PRINT_WIDTH_PX = 277 / 25.4 * 96;
-        // A4 landscape height (210mm) less 10mm margins and ~25mm for the day title,
-        // so a scaled day still fits one page. A day that overflows the page height
-        // gets dropped outright by break-inside:avoid — that's why Friday vanished.
-        const PRINT_HEIGHT_PX = 155 / 25.4 * 96;
         // A4 landscape (210mm) less the 10mm @page margins — the real page box.
         const PAGE_HEIGHT_PX = 190 / 25.4 * 96;
+        // Ceiling on growth, so a 5-column grid doesn't become billboard text.
+        const MAX_SCALE = 2.2;
+        // Space the print-only page header occupies — see printHeightBudget().
+        const PRINT_HEADER_PX = 26;
+        // Most a row may be padded when a width-bound grid has vertical slack.
+        const EXTRA_ROW_PAD_PX = 30;
 
         // Chrome seeds the "Save as PDF" filename from document.title, snapshotted
         // when print() is called — so printPage() sets it before printing rather
@@ -232,27 +234,46 @@ function mode_link(string $source, string $mode): string {
         }
 
         /**
-         * Height the grid may occupy. Multi-container views (master, year) put one
-         * day per page, so they keep the flat budget. Single-grid views (class,
-         * faculty, room) share their page with the header, title and legend — those
-         * are measured so the grid is scaled to leave room, instead of pushing the
-         * legend onto a second page.
+         * Height the grid may occupy on its page. Everything sharing the page is
+         * measured rather than assumed: a flat budget both wasted space (the day
+         * title is far shorter than the 25mm once reserved) and overflowed page 1,
+         * where the print header also has to fit — and an overflowing day section
+         * is moved whole by break-inside:avoid, which is what left the first page
+         * empty but for the title.
          */
-        function printHeightBudget(el, single) {
-            if (!single) return PRINT_HEIGHT_PX;
-            let used = 0;
-            document.querySelectorAll('.print-header, .schedule-meta, .legend, .content-box-body > h2')
-                .forEach(node => { used += node.offsetHeight || 0; });
-            // Sibling headings inside the view partial (class name, faculty name).
-            const heading = el.parentElement && el.parentElement.querySelector('h2');
-            if (heading) used += heading.offsetHeight || 0;
-            return Math.max(200, PAGE_HEIGHT_PX - used - 24);
+        function printHeightBudget(el, single, first, last) {
+            let used = 12; // slack for rounding and cell borders
+            const add = node => { if (node) used += node.offsetHeight || 0; };
+
+            // The print header only exists on the first printed page. It can't be
+            // measured: beforeprint runs while screen styles still apply, where it is
+            // display:none and reports 0 — so reserve the height its print CSS gives
+            // it (one 12pt line plus 4px margin, rounded up).
+            if (first) used += PRINT_HEADER_PX;
+
+            // Day/faculty sections carry their own title above the grid; in By Year
+            // the year heading sits above that section's first day only.
+            const section = el.closest('.master-day-section');
+            if (section) {
+                add(section.querySelector('.master-day-title'));
+                const prev = section.previousElementSibling;
+                if (prev && prev.classList.contains('year-title')) add(prev);
+            }
+
+            // The legend prints after the last grid, so only that page pays for it.
+            if (last) add(document.querySelector('.legend'));
+
+            if (single) {
+                document.querySelectorAll('.schedule-meta, .content-box-body > h2').forEach(add);
+                add(el.parentElement && el.parentElement.querySelector('h2'));
+            }
+            return Math.max(200, PAGE_HEIGHT_PX - used);
         }
 
         function fitPrintTables() {
             const containers = document.querySelectorAll('.timetable-container');
             const single = containers.length === 1;
-            containers.forEach(el => {
+            containers.forEach((el, i) => {
                 const table = el.querySelector('table');
                 if (!table) return;
                 // The table is width:100% of the container, so its own natural width
@@ -262,9 +283,26 @@ function mode_link(string $source, string $mode): string {
                 const width = table.scrollWidth;
                 const height = table.scrollHeight;
                 if (!width || !height) { table.style.width = ''; return; }
-                // No upper clamp: a small grid (e.g. one class, 5 days) grows until it
-                // hits the page width or height, whichever binds first.
-                const scale = Math.min(PRINT_WIDTH_PX / width, printHeightBudget(el, single) / height);
+                // A small grid (e.g. one class, 5 days) grows until it hits the page
+                // width or height, whichever binds first; MAX_SCALE just stops a tiny
+                // grid from being blown up into cartoon-sized text.
+                const budget = printHeightBudget(el, single, i === 0, i === containers.length - 1);
+                let scale = Math.min(PRINT_WIDTH_PX / width, budget / height, MAX_SCALE);
+                let boxHeight = height;
+
+                // A wide grid (the master view has one column per class) is limited by
+                // the page width, so scaling alone leaves half the page blank below it.
+                // Spend that slack on taller rows instead of leaving it empty.
+                const rows = table.rows.length;
+                const slack = budget / scale - height;
+                if (rows && slack > rows) {
+                    const pad = Math.min(EXTRA_ROW_PAD_PX, slack / rows / 2);
+                    table.querySelectorAll('td, th').forEach(cell => {
+                        cell.style.paddingTop = cell.style.paddingBottom = pad + 'px';
+                    });
+                    boxHeight = table.scrollHeight;
+                    scale = Math.min(PRINT_WIDTH_PX / width, budget / boxHeight, MAX_SCALE);
+                }
                 // Shrink the box to the table and scale from the top-left, so the grid
                 // stays flush with the left margin like the rest of the page content.
                 el.style.width = width + 'px';
@@ -272,14 +310,19 @@ function mode_link(string $source, string $mode): string {
                 el.style.transformOrigin = 'top left';
                 // A transform doesn't change the space the element reserves, so the
                 // page would keep a gap under it — clamp the height to match.
-                el.style.height = (height * scale) + 'px';
+                el.style.height = (boxHeight * scale) + 'px';
             });
         }
 
         function resetPrintTables() {
             document.querySelectorAll('.timetable-container').forEach(el => {
                 const table = el.querySelector('table');
-                if (table) table.style.width = '';
+                if (table) {
+                    table.style.width = '';
+                    table.querySelectorAll('td, th').forEach(cell => {
+                        cell.style.paddingTop = cell.style.paddingBottom = '';
+                    });
+                }
                 el.style.transform = '';
                 el.style.transformOrigin = '';
                 el.style.height = '';
@@ -290,6 +333,13 @@ function mode_link(string $source, string $mode): string {
 
         window.addEventListener('beforeprint', fitPrintTables);
         window.addEventListener('afterprint', resetPrintTables);
+
+        // Headless PDF export (chrome --print-to-pdf) never dispatches beforeprint, so
+        // the scaling above would be skipped and the exported file would not match what
+        // the Print button produces. ?printfit=1 applies it on load for that path.
+        if (new URLSearchParams(location.search).get('printfit') === '1') {
+            window.addEventListener('load', fitPrintTables);
+        }
     </script>
 </body>
 </html>
