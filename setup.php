@@ -131,7 +131,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lab = intval($_POST['lab_hours_per_week'] ?? 0);
         $dept = $_POST['department'] ?? '';
         $minor = isset($_POST['is_minor']) ? 1 : 0;
-        db_insert($conn, "INSERT INTO subjects (subject_name, subject_code, subject_type, lecture_hours_per_week, lab_hours_per_week, department, is_minor) VALUES (?, ?, ?, ?, ?, ?, ?)", "sssissi", [$name, $code, $type, $lec, $lab, $dept, $minor]);
+        $lecture_pattern = trim($_POST['lecture_block_pattern'] ?? '');
+        $lab_pattern = trim($_POST['lab_block_pattern'] ?? '');
+        if ($lecture_pattern !== '' && array_sum(array_map('intval', explode(',', $lecture_pattern))) !== $lec) {
+            set_flash('error', 'Lecture block pattern must sum to lecture hours per week.');
+            header("Location: setup.php"); exit;
+        }
+        if ($lab_pattern !== '' && array_sum(array_map('intval', explode(',', $lab_pattern))) !== $lab) {
+            set_flash('error', 'Lab block pattern must sum to lab hours per week.');
+            header("Location: setup.php"); exit;
+        }
+        db_insert($conn, "INSERT INTO subjects (subject_name, subject_code, subject_type, lecture_hours_per_week, lab_hours_per_week, lecture_block_pattern, lab_block_pattern, department, is_minor, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')", "sssissssi", [$name, $code, $type, $lec, $lab, $lecture_pattern === '' ? null : $lecture_pattern, $lab_pattern === '' ? null : $lab_pattern, $dept, $minor]);
         audit_log($conn, 'ADD_SUBJECT', "Added subject: $name");
         set_flash('success', 'Subject added successfully!');
         header("Location: setup.php"); exit;
@@ -145,7 +155,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lab = intval($_POST['lab_hours_per_week'] ?? 0);
         $dept = $_POST['department'] ?? '';
         $minor = isset($_POST['is_minor']) ? 1 : 0;
-        db_execute($conn, "UPDATE subjects SET subject_name=?, subject_code=?, subject_type=?, lecture_hours_per_week=?, lab_hours_per_week=?, department=?, is_minor=? WHERE subject_id=?", "sssissii", [$name, $code, $type, $lec, $lab, $dept, $minor, $id]);
+        $lecture_pattern = trim($_POST['lecture_block_pattern'] ?? '');
+        $lab_pattern = trim($_POST['lab_block_pattern'] ?? '');
+        if ($lecture_pattern !== '' && array_sum(array_map('intval', explode(',', $lecture_pattern))) !== $lec) {
+            set_flash('error', 'Lecture block pattern must sum to lecture hours per week.');
+            header("Location: setup.php"); exit;
+        }
+        if ($lab_pattern !== '' && array_sum(array_map('intval', explode(',', $lab_pattern))) !== $lab) {
+            set_flash('error', 'Lab block pattern must sum to lab hours per week.');
+            header("Location: setup.php"); exit;
+        }
+        db_execute($conn, "UPDATE subjects SET subject_name=?, subject_code=?, subject_type=?, lecture_hours_per_week=?, lab_hours_per_week=?, lecture_block_pattern=?, lab_block_pattern=?, department=?, is_minor=? WHERE subject_id=?", "sssissssii", [$name, $code, $type, $lec, $lab, $lecture_pattern === '' ? null : $lecture_pattern, $lab_pattern === '' ? null : $lab_pattern, $dept, $minor, $id]);
         audit_log($conn, 'EDIT_SUBJECT', "Updated subject ID: $id");
         set_flash('success', 'Subject updated successfully!');
         header("Location: setup.php"); exit;
@@ -751,6 +771,8 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <div class="form-group"><label>Subject Type</label><select name="subject_type"><option value="lecture">Lecture Only</option><option value="lab">Lab Only</option><option value="both">Both</option></select></div>
                             <div class="form-group"><label>Lecture Hours/Week</label><input type="number" name="lecture_hours_per_week" value="3" min="0"></div>
                             <div class="form-group"><label>Lab Hours/Week</label><input type="number" name="lab_hours_per_week" value="2" min="0"></div>
+                            <div class="form-group"><label>Lecture Block Pattern (optional, e.g. "2,1,1")</label><input type="text" name="lecture_block_pattern" pattern="^(\d+(,\d+)*)?$" placeholder="blank = one session per hour"></div>
+                            <div class="form-group"><label>Lab Block Pattern (optional, e.g. "3")</label><input type="text" name="lab_block_pattern" pattern="^(\d+(,\d+)*)?$" placeholder="blank = default 2-hour blocks"></div>
                             <div class="form-group"><label>Department</label><input type="text" name="department" placeholder="e.g., Computer Science"></div>
                             <div class="form-group"><label><input type="checkbox" name="is_minor" value="1"> Minor Subject (for last-slot scheduling)</label></div>
                         </div>
@@ -795,6 +817,8 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                             <div class="form-group"><label>Subject Type</label><select name="subject_type"><option value="lecture" <?php echo $row['subject_type']=='lecture'?'selected':''; ?>>Lecture Only</option><option value="lab" <?php echo $row['subject_type']=='lab'?'selected':''; ?>>Lab Only</option><option value="both" <?php echo $row['subject_type']=='both'?'selected':''; ?>>Both</option></select></div>
                                             <div class="form-group"><label>Lecture Hours/Week</label><input type="number" name="lecture_hours_per_week" value="<?php echo $row['lecture_hours_per_week']; ?>" min="0"></div>
                                             <div class="form-group"><label>Lab Hours/Week</label><input type="number" name="lab_hours_per_week" value="<?php echo $row['lab_hours_per_week']; ?>" min="0"></div>
+                                            <div class="form-group"><label>Lecture Block Pattern (optional, e.g. "2,1,1")</label><input type="text" name="lecture_block_pattern" pattern="^(\d+(,\d+)*)?$" value="<?php echo htmlspecialchars($row['lecture_block_pattern'] ?? ''); ?>"></div>
+                                            <div class="form-group"><label>Lab Block Pattern (optional, e.g. "3")</label><input type="text" name="lab_block_pattern" pattern="^(\d+(,\d+)*)?$" value="<?php echo htmlspecialchars($row['lab_block_pattern'] ?? ''); ?>"></div>
                                             <div class="form-group"><label>Department</label><input type="text" name="department" value="<?php echo htmlspecialchars($row['department']); ?>"></div>
                                             <div class="form-group"><label><input type="checkbox" name="is_minor" value="1" <?php echo $row['is_minor']?'checked':''; ?>> Minor Subject</label></div>
                                         </div>
