@@ -21,8 +21,10 @@ $modes = [
     'room' => 'By Room',
 ];
 
+$extra_modes = ['year_classes' => 'Year - All Class Timetables', 'year_faculty' => 'Year - All Faculty Timetables'];
+
 $view_mode = $_GET['mode'] ?? 'master';
-if (!isset($modes[$view_mode])) { $view_mode = 'master'; }
+if (!isset($modes[$view_mode]) && !isset($extra_modes[$view_mode])) { $view_mode = 'master'; }
 $selected_key = trim((string) ($_GET['key'] ?? ''));
 $selected_id = intval($_GET['id'] ?? 0);
 
@@ -184,10 +186,10 @@ function mode_link(string $source, string $mode): string {
                 // carries the legend, so the first page is the document's title page
                 // instead of the near-empty one a tall first section used to leave.
                 $cover_rows = [
-                    'View' => $modes[$view_mode],
+                    'View' => $modes[$view_mode] ?? $extra_modes[$view_mode] ?? '',
                     'Source' => $source === 'official' ? 'Official timetable (as confirmed by the department)' : 'Generated timetable (scheduler output)',
                 ];
-                if ($view_mode === 'year' && $selected_key !== '') {
+                if (($view_mode === 'year' || $view_mode === 'year_classes' || $view_mode === 'year_faculty') && $selected_key !== '') {
                     $cover_rows['Year'] = tt_year_label($selected_key) . ' (' . $selected_key . ')';
                 } elseif ($selected_key !== '') {
                     $cover_rows[$view_mode === 'room' ? 'Room' : ($view_mode === 'faculty' ? 'Faculty' : 'Class')] = $selected_key;

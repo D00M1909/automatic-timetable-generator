@@ -23,7 +23,7 @@ if ($view_mode === 'all_faculty') {
     foreach (db_get_rows($conn, $query) as $row) {
         $faculty_timetables[$row['faculty_id']][$row['day_id']][$row['slot_id']] = $row;
     }
-} elseif ($view_mode === 'master' || $view_mode === 'year') {
+} elseif ($view_mode === 'master' || $view_mode === 'year' || $view_mode === 'year_classes' || $view_mode === 'year_faculty') {
     // Fetch all timetable entries with class info
     $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name, c.class_code, r.room_name, b.building_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id LEFT JOIN rooms r ON t.room_id = r.room_id LEFT JOIN buildings b ON r.building_id = b.building_id ORDER BY d.day_order, ts.slot_number, c.class_name";
     $rows = db_get_rows($conn, $query);
@@ -116,6 +116,33 @@ function generated_master_day($day, $classes, $master_timetable, $slot_list) {
         </div>
     </div>
     <?php
+}
+
+/** Distinct room_id/faculty_id (with display name) actually booked for a set of class ids. */
+function generated_year_resources($master_timetable, $class_ids) {
+    $class_ids = array_flip($class_ids);
+    $rooms = []; $faculty = [];
+    foreach ($master_timetable as $day) {
+        foreach ($day as $slot) {
+            foreach ($slot as $class_id => $cell) {
+                if (!isset($class_ids[$class_id])) { continue; }
+                if (!empty($cell['room_id'])) { $rooms[$cell['room_id']] = $cell['room_name'] . ' - ' . ($cell['building_name'] ?? ''); }
+                if (!empty($cell['faculty_id'])) { $faculty[$cell['faculty_id']] = $cell['faculty_name']; }
+            }
+        }
+    }
+    asort($rooms); asort($faculty);
+    return [$rooms, $faculty];
+}
+
+/** Full week schedule for one room or faculty member, regardless of year — same query shape as the single room/faculty view. */
+function generated_entity_schedule($conn, $type, $id) {
+    $col = $type === 'room' ? 't.room_id' : ($type === 'class' ? 't.class_id' : 't.faculty_id');
+    $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name, r.room_name, b.building_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id LEFT JOIN rooms r ON t.room_id = r.room_id LEFT JOIN buildings b ON r.building_id = b.building_id WHERE $col = ? ORDER BY d.day_order, ts.slot_number";
+    $rows = db_get_rows($conn, $query, "i", [$id]);
+    $data = [];
+    foreach ($rows as $row) { $data[$row['day_id']][$row['slot_id']] = $row; }
+    return $data;
 }
 
 /** The time x day table used by the class, faculty and room views. */
@@ -229,6 +256,38 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                             <?php foreach ($day_list as $day): ?>
                                 <?php generated_master_day($day, $year_classes, $master_timetable, $slot_list); ?>
                             <?php endforeach; ?>
+                        <?php endforeach; ?>
+                        <?php if (count($shown_years) === 1): ?>
+                            <div class="filter-bar" style="margin-top:20px;">
+                                <a class="btn" href="view.php?source=generated&mode=year_classes&key=<?php echo urlencode($shown_years[0]); ?>">Print: All Class Timetables (PDF)</a>
+                                <a class="btn" href="view.php?source=generated&mode=year_faculty&key=<?php echo urlencode($shown_years[0]); ?>">Print: All Faculty Timetables (PDF)</a>
+                            </div>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
+                <?php elseif ($view_mode === 'year_classes' || $view_mode === 'year_faculty'): ?>
+
+                    <?php
+                    $year_classes = array_values(array_filter($classes, static fn($c) => tt_year_code($c['class_name']) === $selected_key));
+                    $year_class_ids = array_column($year_classes, 'class_id');
+                    [$year_room_ids, $year_faculty_ids] = generated_year_resources($master_timetable, $year_class_ids);
+                    ?>
+                    <h2 class="year-title"><?php echo htmlspecialchars(tt_year_label($selected_key)); ?> &mdash; <?php echo $view_mode === 'year_classes' ? 'Class Timetables' : 'Faculty Timetables'; ?></h2>
+
+                    <?php if ($view_mode === 'year_classes'): ?>
+                        <?php foreach ($year_classes as $class): ?>
+                            <?php $entity_rows = generated_entity_schedule($conn, 'class', $class['class_id']); ?>
+                            <div class="master-day-section">
+                                <div class="master-day-title"><?php echo htmlspecialchars($class['class_name']); ?></div>
+                                <?php generated_person_table($entity_rows, $day_list, $slot_list, 'class'); ?>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <?php foreach ($year_faculty_ids as $faculty_id => $faculty_label): ?>
+                            <div class="master-day-section">
+                                <div class="master-day-title"><?php echo htmlspecialchars($faculty_label); ?></div>
+                                <?php generated_person_table(generated_entity_schedule($conn, 'faculty', $faculty_id), $day_list, $slot_list, 'faculty'); ?>
+                            </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
 
