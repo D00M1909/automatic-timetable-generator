@@ -45,7 +45,7 @@ const TIME_SLOTS = [
 
 function class_year_of_study(string $class_name): int {
     return match (strtoupper(substr($class_name, 0, 2))) {
-        'SY' => 2, 'TY' => 3, 'BE' => 4, default => 2,
+        'FY' => 1, 'SY' => 2, 'TY' => 3, 'BE' => 4, default => 2,
     };
 }
 
@@ -68,13 +68,19 @@ function faculty_code(string $name, array $used): string {
 
 $conn->begin_transaction();
 try {
-    // Wipe owned master tables. Deleting classes/subjects/faculty cascades away
-    // subject_assignments and timetable rows that reference them (see timetable_db.sql
-    // FK definitions); deleting time_slots cascades stale faculty_preferences/
-    // faculty_unavailable/time_preferences/room_unavailable set against old slots.
-    foreach (['classes', 'subjects', 'faculty', 'time_slots', 'rooms', 'buildings', 'year_working_days'] as $t) {
-        $conn->query("DELETE FROM `$t`");
+    // Wipe owned master tables, scoped to source='excel' so hand-entered FY rows
+    // (added via setup.php, source='manual') survive a re-run. Deleting
+    // classes/subjects/faculty cascades away subject_assignments and timetable rows
+    // that reference them (see timetable_db.sql FK definitions); deleting time_slots
+    // cascades stale faculty_preferences/faculty_unavailable/time_preferences/
+    // room_unavailable set against old slots — only for the excel-owned slots being
+    // rebuilt, FY's own manually-entered slots and their constraints are untouched.
+    foreach (['classes', 'subjects', 'faculty', 'time_slots', 'rooms', 'buildings'] as $t) {
+        $conn->query("DELETE FROM `$t` WHERE source='excel'");
     }
+    // year_working_days has no source column and no FY data lives in it (FY has no
+    // minor-subject day mapping) — full wipe is still correct here.
+    $conn->query("DELETE FROM year_working_days");
 
     // ---- Building + rooms ----
     $building_id = db_insert($conn, "INSERT INTO buildings (building_name, has_ac, energy_rating) VALUES (?, 1, 'A')", "s", ['ULC']);
@@ -110,6 +116,7 @@ try {
     // TY and BE -> Wed/Thu/Fri. generate.php reserves the last class slot of the day for
     // minor subjects on these days. ----
     $day_ids = array_column(db_get_rows($conn, "SELECT day_id, day_name FROM working_days"), 'day_id', 'day_name');
+    // Year 1 (FY) intentionally has no minor-day mapping — no minor-subject data exists for FY.
     $minor_days_by_year = [2 => ['Monday', 'Tuesday', 'Wednesday'], 3 => ['Wednesday', 'Thursday', 'Friday'], 4 => ['Wednesday', 'Thursday', 'Friday']];
     foreach ($minor_days_by_year as $year_of_study => $day_names) {
         foreach ($day_names as $day_name) {
