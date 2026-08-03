@@ -28,8 +28,17 @@ $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORD
 	// time_slots.year_of_study NULL = shared across all years (existing SY/TY/BE grid);
 	// a specific value = only that year's classes may use this slot (e.g. FY's own grid).
 	function class_slots_for(array $time_slots, $year_of_study): array {
-	    return array_values(array_filter($time_slots, function($s) use ($year_of_study) {
-	        return $s['slot_type'] === 'class' && ($s['year_of_study'] === null || (int)$s['year_of_study'] === (int)$year_of_study);
+	    // If this year has its own dedicated slot rows (e.g. FY's separate 5-day grid),
+	    // use ONLY those — mixing them with the shared grid would collide on slot_number
+	    // (both numbered 1..9 but meaning different times) since slot_number is only
+	    // unique within a grid, not globally. Years with no dedicated rows of their own
+	    // (SY/TY/BE today) fall back to the shared grid exactly as before.
+	    $year_specific = array_values(array_filter($time_slots, function($s) use ($year_of_study) {
+	        return $s['slot_type'] === 'class' && $s['year_of_study'] !== null && (int)$s['year_of_study'] === (int)$year_of_study;
+	    }));
+	    if ($year_specific) return $year_specific;
+	    return array_values(array_filter($time_slots, function($s) {
+	        return $s['slot_type'] === 'class' && $s['year_of_study'] === null;
 	    }));
 	}
 
@@ -378,9 +387,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                    $retry_errors = [];
 	                    foreach ($errors as $err) {
 	                        // Parse the error to find the assignment
-	                        if (preg_match('/Failed to place (Lecture|Lab): (.+) for (.+)/', $err, $m)) {
-	                            $subj_name = $m[2];
-	                            $class_name = $m[3];
+	                        if (preg_match('/Failed to place (?:Lecture(?: block)?|Lab): (.+) for (.+)/', $err, $m)) {
+	                            $subj_name = $m[1];
+	                            $class_name = $m[2];
 	                            
 	                            // Find the assignment that failed
 	                            $failed_assignments = array_filter($assignments, function($a) use ($subj_name, $class_name) {
