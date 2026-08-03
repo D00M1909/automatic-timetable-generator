@@ -228,7 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $has_proj = isset($_POST['has_projector']) ? 1 : 0;
         $has_ac = isset($_POST['has_ac']) ? 1 : 0;
         $floor = intval($_POST['floor_number'] ?? 1);
-        db_insert($conn, "INSERT INTO rooms (building_id, room_name, room_type, capacity, has_projector, has_ac, floor_number) VALUES (?, ?, ?, ?, ?, ?, ?)", "issiiii", [$building_id, $name, $type, $capacity, $has_proj, $has_ac, $floor]);
+        db_insert($conn, "INSERT INTO rooms (building_id, room_name, room_type, capacity, has_projector, has_ac, floor_number, source) VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')", "issiiii", [$building_id, $name, $type, $capacity, $has_proj, $has_ac, $floor]);
         audit_log($conn, 'ADD_ROOM', "Added room: $name");
         set_flash('success', 'Room added successfully!');
         header("Location: setup.php"); exit;
@@ -255,11 +255,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header("Location: setup.php"); exit;
     }
 
+    if ($action === 'add_slot') {
+        $num = intval($_POST['slot_number'] ?? 0);
+        $start = $_POST['start_time'] ?? '';
+        $end = $_POST['end_time'] ?? '';
+        $type = require_enum($_POST['slot_type'] ?? 'class', ['class', 'break', 'lunch'], 'slot type');
+        // year_of_study blank = shared across all years (existing SY/TY/BE grid);
+        // a specific value scopes this slot to only that year (e.g. FY's own grid).
+        $year_of_study = ($_POST['year_of_study'] ?? '') !== '' ? intval($_POST['year_of_study']) : null;
+        db_insert($conn, "INSERT INTO time_slots (slot_number, start_time, end_time, slot_type, is_active, year_of_study, source) VALUES (?, ?, ?, ?, 1, ?, 'manual')", "isssi", [$num, $start, $end, $type, $year_of_study]);
+        audit_log($conn, 'ADD_SLOT', "Added time slot #$num");
+        set_flash('success', 'Time slot added successfully!');
+        header("Location: setup.php"); exit;
+    }
+    if ($action === 'edit_slot') {
+        $id = intval($_POST['slot_id'] ?? 0);
+        $num = intval($_POST['slot_number'] ?? 0);
+        $start = $_POST['start_time'] ?? '';
+        $end = $_POST['end_time'] ?? '';
+        $type = require_enum($_POST['slot_type'] ?? 'class', ['class', 'break', 'lunch'], 'slot type');
+        $year_of_study = ($_POST['year_of_study'] ?? '') !== '' ? intval($_POST['year_of_study']) : null;
+        db_execute($conn, "UPDATE time_slots SET slot_number=?, start_time=?, end_time=?, slot_type=?, year_of_study=? WHERE slot_id=?", "isssii", [$num, $start, $end, $type, $year_of_study, $id]);
+        audit_log($conn, 'EDIT_SLOT', "Updated time slot ID: $id");
+        set_flash('success', 'Time slot updated successfully!');
+        header("Location: setup.php"); exit;
+    }
+    if ($action === 'delete_slot') {
+        $id = intval($_POST['slot_id'] ?? 0);
+        db_execute($conn, "DELETE FROM time_slots WHERE slot_id=?", "i", [$id]);
+        audit_log($conn, 'DELETE_SLOT', "Deleted time slot ID: $id");
+        set_flash('success', 'Time slot deleted successfully!');
+        header("Location: setup.php"); exit;
+    }
+
     if ($action === 'add_building') {
         $name = $_POST['building_name'] ?? '';
         $has_ac = isset($_POST['has_ac']) ? 1 : 0;
         $rating = require_enum($_POST['energy_rating'] ?? 'B', ['A', 'B', 'C'], 'energy rating');
-        db_insert($conn, "INSERT INTO buildings (building_name, has_ac, energy_rating) VALUES (?, ?, ?)", "sis", [$name, $has_ac, $rating]);
+        db_insert($conn, "INSERT INTO buildings (building_name, has_ac, energy_rating, source) VALUES (?, ?, ?, 'manual')", "sis", [$name, $has_ac, $rating]);
         audit_log($conn, 'ADD_BUILDING', "Added building: $name");
         set_flash('success', 'Building added successfully!');
         header("Location: setup.php"); exit;
@@ -368,6 +401,7 @@ $preferences = db_get_rows($conn, "SELECT fp.*, f.faculty_name, d.day_name, ts.s
 	$building_preferences = db_get_rows($conn, "SELECT bp.*, f.faculty_name, b.building_name FROM building_preferences bp JOIN faculty f ON bp.faculty_id = f.faculty_id JOIN buildings b ON bp.building_id = b.building_id ORDER BY bp.preference_id DESC");
 $working_days = db_get_rows($conn, "SELECT * FROM working_days WHERE is_working=1 ORDER BY day_order");
 $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 AND slot_type='class' ORDER BY slot_number");
+$all_time_slots = db_get_rows($conn, "SELECT * FROM time_slots ORDER BY year_of_study IS NULL DESC, year_of_study, slot_number");
 
 $years_list = db_get_rows($conn, "SELECT * FROM years WHERE year_status='active' ORDER BY year_id DESC");
 $classes_list = db_get_rows($conn, "SELECT * FROM classes ORDER BY class_name");
@@ -1133,6 +1167,78 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                 </table>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== TIME SLOTS SECTION ==================== -->
+        <div class="section-card">
+            <div class="section-header collapsed" onclick="toggleSection('sec-time-slots')">
+                <div class="header-left">
+                    <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zM12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg> Time Slots
+                </div>
+                <div class="toggle-icon"><svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg></div>
+            </div>
+            <div class="section-body collapsed" id="sec-time-slots">
+                <div class="inner-wrapper">
+                    <div class="form-section-title">Add Time Slot</div>
+                    <form method="POST" style="margin-bottom:20px;" class="track-form">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="add_slot">
+                        <div class="form-grid">
+                            <div class="form-group"><label>Slot Number</label><input type="number" name="slot_number" required min="1"></div>
+                            <div class="form-group"><label>Start Time</label><input type="time" name="start_time" required></div>
+                            <div class="form-group"><label>End Time</label><input type="time" name="end_time" required></div>
+                            <div class="form-group"><label>Slot Type</label><select name="slot_type"><option value="class">Class</option><option value="break">Break</option><option value="lunch">Lunch</option></select></div>
+                            <div class="form-group"><label>Year of Study (blank = shared, e.g. all of SY/TY/BE)</label><select name="year_of_study"><option value="">-- Shared --</option><option value="1">FY only</option><option value="2">SY only</option><option value="3">TY only</option><option value="4">BE only</option></select></div>
+                        </div>
+                        <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
+                            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add Time Slot
+                        </button>
+                    </form>
+                    <div class="data-table">
+                        <table>
+                            <tr><th>#</th><th>Slot</th><th>Time</th><th>Type</th><th>Year</th><th class="text-right">Actions</th></tr>
+                            <?php foreach($all_time_slots as $i => $row): ?>
+                            <tr>
+                                <td><?php echo $i + 1; ?></td>
+                                <td><?php echo $row['slot_number']; ?></td>
+                                <td><?php echo $row['start_time']; ?> - <?php echo $row['end_time']; ?></td>
+                                <td><span class="badge badge-blue"><?php echo htmlspecialchars($row['slot_type']); ?></span></td>
+                                <td><?php echo $row['year_of_study'] === null ? '<span class="badge" style="background:#eee;color:#999;">Shared</span>' : '<span class="badge badge-green">' . ['', 'FY', 'SY', 'TY', 'BE'][$row['year_of_study']] . '</span>'; ?></td>
+                                <td class="text-right">
+                                    <button type="button" class="action-btn edit" onclick="toggleEdit('slot-edit-<?php echo $row['slot_id']; ?>')">
+                                        <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Edit
+                                    </button>
+                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this time slot?');" class="track-form">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="action" value="delete_slot">
+                                        <input type="hidden" name="slot_id" value="<?php echo $row['slot_id']; ?>">
+                                        <button type="submit" class="action-btn delete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <tr><td colspan="6" style="padding:0;">
+                                <div id="slot-edit-<?php echo $row['slot_id']; ?>" class="edit-form">
+                                    <div class="form-section-title">Edit Time Slot</div>
+                                    <form method="POST" class="track-form">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="action" value="edit_slot">
+                                        <input type="hidden" name="slot_id" value="<?php echo $row['slot_id']; ?>">
+                                        <div class="form-grid">
+                                            <div class="form-group"><label>Slot Number</label><input type="number" name="slot_number" value="<?php echo $row['slot_number']; ?>" required min="1"></div>
+                                            <div class="form-group"><label>Start Time</label><input type="time" name="start_time" value="<?php echo substr($row['start_time'], 0, 5); ?>" required></div>
+                                            <div class="form-group"><label>End Time</label><input type="time" name="end_time" value="<?php echo substr($row['end_time'], 0, 5); ?>" required></div>
+                                            <div class="form-group"><label>Slot Type</label><select name="slot_type"><option value="class" <?php echo $row['slot_type']=='class'?'selected':''; ?>>Class</option><option value="break" <?php echo $row['slot_type']=='break'?'selected':''; ?>>Break</option><option value="lunch" <?php echo $row['slot_type']=='lunch'?'selected':''; ?>>Lunch</option></select></div>
+                                            <div class="form-group"><label>Year of Study</label><select name="year_of_study"><option value="" <?php echo $row['year_of_study']===null?'selected':''; ?>>-- Shared --</option><option value="1" <?php echo $row['year_of_study']==1?'selected':''; ?>>FY only</option><option value="2" <?php echo $row['year_of_study']==2?'selected':''; ?>>SY only</option><option value="3" <?php echo $row['year_of_study']==3?'selected':''; ?>>TY only</option><option value="4" <?php echo $row['year_of_study']==4?'selected':''; ?>>BE only</option></select></div>
+                                        </div>
+                                        <button type="submit" class="btn btn-submit" style="background:#3498db;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes</button>
+                                    </form>
+                                </div>
+                            </td></tr>
+                            <?php endforeach; ?>
+                        </table>
                     </div>
                 </div>
             </div>
