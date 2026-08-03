@@ -55,7 +55,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = $_POST['class_code'] ?? '';
         $strength = intval($_POST['strength'] ?? 0);
         $skip = isset($_POST['skip_generation']) ? 1 : 0;
-        db_insert($conn, "INSERT INTO classes (year_id, class_name, class_code, strength, skip_generation) VALUES (?, ?, ?, ?, ?)", "issii", [$year_id, $name, $code, $strength, $skip]);
+        $year_of_study = intval($_POST['year_of_study'] ?? 2);
+        $min_start = ($_POST['min_start_slot_number'] ?? '') !== '' ? intval($_POST['min_start_slot_number']) : null;
+        $max_end = ($_POST['max_end_slot_number'] ?? '') !== '' ? intval($_POST['max_end_slot_number']) : null;
+        db_insert($conn, "INSERT INTO classes (year_id, class_name, class_code, strength, skip_generation, year_of_study, source, min_start_slot_number, max_end_slot_number) VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?)", "issiiiii", [$year_id, $name, $code, $strength, $skip, $year_of_study, $min_start, $max_end]);
         audit_log($conn, 'ADD_CLASS', "Added class: $name");
         set_flash('success', 'Class added successfully!');
         header("Location: setup.php"); exit;
@@ -67,7 +70,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = $_POST['class_code'] ?? '';
         $strength = intval($_POST['strength'] ?? 0);
         $skip = isset($_POST['skip_generation']) ? 1 : 0;
-        db_execute($conn, "UPDATE classes SET year_id=?, class_name=?, class_code=?, strength=?, skip_generation=? WHERE class_id=?", "issiii", [$year_id, $name, $code, $strength, $skip, $id]);
+        $year_of_study = intval($_POST['year_of_study'] ?? 2);
+        $min_start = ($_POST['min_start_slot_number'] ?? '') !== '' ? intval($_POST['min_start_slot_number']) : null;
+        $max_end = ($_POST['max_end_slot_number'] ?? '') !== '' ? intval($_POST['max_end_slot_number']) : null;
+        db_execute($conn, "UPDATE classes SET year_id=?, class_name=?, class_code=?, strength=?, skip_generation=?, year_of_study=?, min_start_slot_number=?, max_end_slot_number=? WHERE class_id=?", "issiiiiii", [$year_id, $name, $code, $strength, $skip, $year_of_study, $min_start, $max_end, $id]);
         audit_log($conn, 'EDIT_CLASS', "Updated class ID: $id");
         set_flash('success', 'Class updated successfully!');
         header("Location: setup.php"); exit;
@@ -585,6 +591,9 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                             <div class="form-group"><label>Class Name</label><input type="text" name="class_name" required placeholder="e.g., Class A"></div>
                             <div class="form-group"><label>Class Code</label><input type="text" name="class_code" required placeholder="e.g., FY-A"></div>
                             <div class="form-group"><label>Student Strength</label><input type="number" name="strength" value="0" min="0"></div>
+                            <div class="form-group"><label>Year of Study</label><select name="year_of_study" required><option value="1">FY</option><option value="2" selected>SY</option><option value="3">TY</option><option value="4">BE</option></select></div>
+                            <div class="form-group"><label>Min Start Slot Number (optional)</label><input type="number" name="min_start_slot_number" min="1"></div>
+                            <div class="form-group"><label>Max End Slot Number (optional)</label><input type="number" name="max_end_slot_number" min="1"></div>
                             <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_add"><label for="skip_gen_add" style="color: #e74c3c;">Skip Generation (Keep Data)</label></div></div>
                         </div>
                         <button type="submit" class="btn btn-submit btn-success" style="background:#27ae60;">
@@ -626,6 +635,9 @@ $buildings_list = db_get_rows($conn, "SELECT * FROM buildings ORDER BY building_
                                             <div class="form-group"><label>Class Name</label><input type="text" name="class_name" value="<?php echo htmlspecialchars($row['class_name']); ?>" required></div>
                                             <div class="form-group"><label>Class Code</label><input type="text" name="class_code" value="<?php echo htmlspecialchars($row['class_code']); ?>" required></div>
                                             <div class="form-group"><label>Student Strength</label><input type="number" name="strength" value="<?php echo $row['strength']; ?>" min="0"></div>
+                                            <div class="form-group"><label>Year of Study</label><select name="year_of_study" required><option value="1" <?php echo $row['year_of_study']==1?'selected':''; ?>>FY</option><option value="2" <?php echo $row['year_of_study']==2?'selected':''; ?>>SY</option><option value="3" <?php echo $row['year_of_study']==3?'selected':''; ?>>TY</option><option value="4" <?php echo $row['year_of_study']==4?'selected':''; ?>>BE</option></select></div>
+                                            <div class="form-group"><label>Min Start Slot Number (optional)</label><input type="number" name="min_start_slot_number" min="1" value="<?php echo htmlspecialchars($row['min_start_slot_number'] ?? ''); ?>"></div>
+                                            <div class="form-group"><label>Max End Slot Number (optional)</label><input type="number" name="max_end_slot_number" min="1" value="<?php echo htmlspecialchars($row['max_end_slot_number'] ?? ''); ?>"></div>
                                             <div class="form-group"><div class="checkbox-group" style="padding-top:20px;"><input type="checkbox" name="skip_generation" id="skip_gen_<?php echo $row['class_id']; ?>" <?php echo $row['skip_generation'] ? 'checked' : ''; ?>><label for="skip_gen_<?php echo $row['class_id']; ?>" style="color: #e74c3c;">Skip Generation (Keep Data)</label></div></div>
                                         </div>
                                         <button type="submit" class="btn btn-submit" style="background:#3498db;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg> Save Changes</button>
