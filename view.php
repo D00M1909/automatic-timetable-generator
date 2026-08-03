@@ -21,7 +21,7 @@ $modes = [
     'room' => 'By Room',
 ];
 
-$extra_modes = ['year_classes' => 'Year - All Class Timetables', 'year_faculty' => 'Year - All Faculty Timetables'];
+$extra_modes = ['year_classes' => 'Year - All Class Timetables', 'year_faculty' => 'Year - All Faculty Timetables', 'year_rooms' => 'Year - All Room Timetables'];
 
 $view_mode = $_GET['mode'] ?? 'master';
 if (!isset($modes[$view_mode]) && !isset($extra_modes[$view_mode])) { $view_mode = 'master'; }
@@ -189,7 +189,7 @@ function mode_link(string $source, string $mode): string {
                     'View' => $modes[$view_mode] ?? $extra_modes[$view_mode] ?? '',
                     'Source' => $source === 'official' ? 'Official timetable (as confirmed by the department)' : 'Generated timetable (scheduler output)',
                 ];
-                if (($view_mode === 'year' || $view_mode === 'year_classes' || $view_mode === 'year_faculty') && $selected_key !== '') {
+                if (($view_mode === 'year' || $view_mode === 'year_classes' || $view_mode === 'year_faculty' || $view_mode === 'year_rooms') && $selected_key !== '') {
                     $cover_rows['Year'] = tt_year_label($selected_key) . ' (' . $selected_key . ')';
                 } elseif ($selected_key !== '') {
                     $cover_rows[$view_mode === 'room' ? 'Room' : ($view_mode === 'faculty' ? 'Faculty' : 'Class')] = $selected_key;

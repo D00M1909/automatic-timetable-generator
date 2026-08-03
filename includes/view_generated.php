@@ -23,7 +23,7 @@ if ($view_mode === 'all_faculty') {
     foreach (db_get_rows($conn, $query) as $row) {
         $faculty_timetables[$row['faculty_id']][$row['day_id']][$row['slot_id']] = $row;
     }
-} elseif ($view_mode === 'master' || $view_mode === 'year' || $view_mode === 'year_classes' || $view_mode === 'year_faculty') {
+} elseif ($view_mode === 'master' || $view_mode === 'year' || $view_mode === 'year_classes' || $view_mode === 'year_faculty' || $view_mode === 'year_rooms') {
     // Fetch all timetable entries with class info
     $query = "SELECT t.*, d.day_name, d.day_order, ts.start_time, ts.end_time, ts.slot_type, s.subject_name, s.subject_code, f.faculty_name, f.faculty_code, c.class_name, c.class_code, r.room_name, b.building_name FROM timetable t JOIN working_days d ON t.day_id = d.day_id JOIN time_slots ts ON t.slot_id = ts.slot_id LEFT JOIN subjects s ON t.subject_id = s.subject_id LEFT JOIN faculty f ON t.faculty_id = f.faculty_id LEFT JOIN classes c ON t.class_id = c.class_id LEFT JOIN rooms r ON t.room_id = r.room_id LEFT JOIN buildings b ON r.building_id = b.building_id ORDER BY d.day_order, ts.slot_number, c.class_name";
     $rows = db_get_rows($conn, $query);
@@ -261,18 +261,19 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                             <div class="filter-bar" style="margin-top:20px;">
                                 <a class="btn" href="view.php?source=generated&mode=year_classes&key=<?php echo urlencode($shown_years[0]); ?>">Print: All Class Timetables (PDF)</a>
                                 <a class="btn" href="view.php?source=generated&mode=year_faculty&key=<?php echo urlencode($shown_years[0]); ?>">Print: All Faculty Timetables (PDF)</a>
+                                <a class="btn" href="view.php?source=generated&mode=year_rooms&key=<?php echo urlencode($shown_years[0]); ?>">Print: All Room Timetables (PDF)</a>
                             </div>
                         <?php endif; ?>
                     <?php endif; ?>
 
-                <?php elseif ($view_mode === 'year_classes' || $view_mode === 'year_faculty'): ?>
+                <?php elseif ($view_mode === 'year_classes' || $view_mode === 'year_faculty' || $view_mode === 'year_rooms'): ?>
 
                     <?php
                     $year_classes = array_values(array_filter($classes, static fn($c) => tt_year_code($c['class_name']) === $selected_key));
                     $year_class_ids = array_column($year_classes, 'class_id');
                     [$year_room_ids, $year_faculty_ids] = generated_year_resources($master_timetable, $year_class_ids);
                     ?>
-                    <h2 class="year-title"><?php echo htmlspecialchars(tt_year_label($selected_key)); ?> &mdash; <?php echo $view_mode === 'year_classes' ? 'Class Timetables' : 'Faculty Timetables'; ?></h2>
+                    <h2 class="year-title"><?php echo htmlspecialchars(tt_year_label($selected_key)); ?> &mdash; <?php echo $view_mode === 'year_classes' ? 'Class Timetables' : ($view_mode === 'year_faculty' ? 'Faculty Timetables' : 'Room Timetables'); ?></h2>
 
                     <?php if ($view_mode === 'year_classes'): ?>
                         <?php foreach ($year_classes as $class): ?>
@@ -280,6 +281,13 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                             <div class="master-day-section">
                                 <div class="master-day-title"><?php echo htmlspecialchars($class['class_name']); ?></div>
                                 <?php generated_person_table($entity_rows, $day_list, $slot_list, 'class'); ?>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php elseif ($view_mode === 'year_rooms'): ?>
+                        <?php foreach ($year_room_ids as $room_id => $room_label): ?>
+                            <div class="master-day-section">
+                                <div class="master-day-title"><?php echo htmlspecialchars($room_label); ?></div>
+                                <?php generated_person_table(generated_entity_schedule($conn, 'room', $room_id), $day_list, $slot_list, 'room'); ?>
                             </div>
                         <?php endforeach; ?>
                     <?php else: ?>
