@@ -4,6 +4,14 @@ require_once 'includes/timetable_data.php';
 
 // Two data sources: the official Excel import, and whatever our scheduler produced in the DB.
 $source = ($_GET['source'] ?? 'official') === 'generated' ? 'generated' : 'official';
+
+// FY has no official import — never let source=official carry an FY key;
+// redirect to the generated view instead of relying on incidental fallback.
+if ($source === 'official' && isset($_GET['key']) && strtoupper(substr($_GET['key'], 0, 2)) === 'FY') {
+    header('Location: view.php?' . http_build_query(array_merge($_GET, ['source' => 'generated'])));
+    exit;
+}
+
 $modes = [
     'master' => 'Master View (All Classes)',
     'year' => 'By Year',
