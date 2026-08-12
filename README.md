@@ -58,8 +58,11 @@ The full timetable is built in memory and committed in a single transaction — 
 | By Faculty | Single faculty member's weekly load |
 | All Faculty | Faculty workload comparison across the department |
 | By Room | Room-by-room occupancy |
+| All Rooms | Room-allocation matrix: rooms down the side, day/period across |
 
 Each view can render either the **official** timetable (imported from the department's published Excel schedule) or the **generated** timetable (this engine's output), for direct comparison. Print export is handled entirely through `@media print` CSS — `@page { size: A4 landscape }`, per-day page breaks, and a document-title swap before `window.print()` so the browser's Save-as-PDF picks up a real filename. No PDF library is involved.
+
+Every view also exports to `.xlsx` via `export_excel.php`, which takes the same query parameters as `view.php`.
 
 ### Dashboard
 
@@ -79,7 +82,7 @@ MySQL schema (`timetable_schema.sql`), core tables:
 
 - `years`, `classes`, `faculty`, `subjects`, `subject_assignments` — the entities and their links
 - `buildings`, `rooms` — physical spaces, with type/capacity/AC
-- `time_slots`, `working_days`, `year_working_days` — the time grid and each year's fixed meeting days
+- `time_slots`, `working_days`, `year_working_days` — the time grid and each year's fixed meeting days; `year_working_days.slot_number` marks which slot that day reserves for minor subjects (null = none)
 - `faculty_unavailable`, `room_unavailable`, `faculty_preferences`, `faculty_absences` — constraint inputs to the scorer
 - `timetable` — generated output
 - `timetable_audit_log` — change history
@@ -87,9 +90,10 @@ MySQL schema (`timetable_schema.sql`), core tables:
 ## Installation & Setup
 
 **Prerequisites:**
-- PHP 7.4+ with `mysqli`
+- PHP 7.4+ with `mysqli`, plus `zip` and `gd` for the Excel export
 - MySQL/MariaDB
 - Apache (tested on XAMPP)
+- Composer, for PhpSpreadsheet
 
 **Setup:**
 ```bash
@@ -97,10 +101,32 @@ git clone https://github.com/D00M1909/automatic-timetable-generator.git
 cd automatic-timetable-generator
 ```
 
+Enable the two extensions the Excel export needs. XAMPP ships both DLLs but leaves them commented out — uncomment these lines in `C:\xampp\php\php.ini` and restart Apache:
+```ini
+extension=gd
+extension=zip
+```
+`zip` is not optional: an `.xlsx` file is a ZIP archive, so `ZipArchive` must be present. PhpSpreadsheet 5.x requires `gd` outright.
+
+Install the PHP dependencies (`vendor/` is not committed):
+```bash
+composer install
+```
+No system-wide Composer? Install it into the project instead, then use `php composer.phar install`:
+```bash
+php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+php composer-setup.php --quiet && rm composer-setup.php
+```
+
 Import the schema and seed data:
 ```bash
 mysql -u root -p < timetable_schema.sql
 mysql -u root -p timetable_db < timetable_db.sql
+```
+
+Apply any migrations in `db/migrations/` in filename order. They are written to be idempotent, so re-running one is safe:
+```bash
+mysql -u root -p timetable_db < db/migrations/2026-08-12_animation_lab.sql
 ```
 
 By default `includes/config.php` connects to `timetable_db` on `localhost` with user `root` and no password (standard XAMPP defaults). Override via `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME` environment variables if your setup differs.

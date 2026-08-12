@@ -6,7 +6,10 @@ $schedules = tt_load();
 $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 $class_names = array_map(static fn($s) => $s['class_name'], $schedules);
 $faculty_names = tt_faculty_list($schedules);
-$room_names = tt_room_list($schedules);
+// Blocks come from the DB, not the workbook, so rooms that only exist there
+// (Animation Lab) have to be folded into the official room list explicitly.
+$external_blocks = tt_external_blocks($conn);
+$room_names = tt_room_list($schedules, array_keys($external_blocks));
 
 /** [time][day] => session, for one schedule. */
 function official_grid(array $schedule): array {
@@ -20,6 +23,12 @@ function official_grid(array $schedule): array {
 }
 
 function official_cell(array $session, string $context): string {
+    // External booking (room_unavailable): the reason names the outside class, and
+    // there is no subject/faculty/room of ours to show alongside it.
+    if (!empty($session['is_blocked'])) {
+        return '<div class="subject-name">' . htmlspecialchars($session['reason']) . '</div>'
+             . '<div class="blocked-badge">BLOCKED</div>';
+    }
     $out = '<div class="subject-name">' . htmlspecialchars($session['subject_code'] ?: $session['entry']) . '</div>';
     $title = $session['subject'] !== '' ? $session['subject'] : $session['entry'];
     if ($context === 'faculty' || $context === 'room') {
@@ -122,6 +131,28 @@ function official_faculty_grid(array $schedules, string $faculty, array &$breaks
     return $grid;
 }
 
+/**
+ * Merge one room's external blocks into its [time][day] grid. $blocks is
+ * [time_key][day] => reason; the grid is keyed by the sheet's time label, so the
+ * two are matched through tt_time_key(). A block never overwrites a real session:
+ * if the workbook already put a class there, that clash is the department's to
+ * resolve and hiding it would be the wrong call.
+ */
+function official_add_blocks(array &$grid, array $blocks, array $times): void {
+    if (!$blocks) { return; }
+    foreach ($times as $time) {
+        $key = tt_time_key($time);
+        foreach ($blocks[$key] ?? [] as $day => $reason) {
+            if (!empty($grid[$time][$day])) { continue; }
+            $grid[$time][$day][] = [
+                'entry' => $reason, 'subject' => $reason, 'subject_code' => $reason,
+                'faculty' => '', 'room' => '', 'is_lab' => false,
+                'is_blocked' => true, 'reason' => $reason, 'duration_slots' => 1,
+            ];
+        }
+    }
+}
+
 /** The time x day table used by the faculty and room views. */
 function official_person_table(array $grid, array $days, array $times, array $breaks, string $context): void {
     $covered = array_fill_keys($days, 0);
@@ -142,7 +173,7 @@ function official_person_table(array $grid, array $days, array $times, array $br
                             $duration = count($items) === 1 ? official_duration_slots($items[0]) : 1;
                             if ($duration > 1) { $covered[$day] = $duration - 1; }
                             ?>
-                            <td<?php echo $duration > 1 ? ' rowspan="' . $duration . '"' : ''; ?> class="<?php echo $items ? 'class-slot' . (!empty($items[0]['is_lab']) ? ' lab' : '') : 'empty-slot'; ?>">
+                            <td<?php echo $duration > 1 ? ' rowspan="' . $duration . '"' : ''; ?> class="<?php echo $items ? (!empty($items[0]['is_blocked']) ? 'blocked-slot' : 'class-slot' . (!empty($items[0]['is_lab']) ? ' lab' : '')) : 'empty-slot'; ?>">
                                 <?php
                                 if (!$items) { echo '--'; }
                                 foreach ($items as $session) { echo official_cell($session, $context); }
@@ -205,6 +236,14 @@ function official_person_table(array $grid, array $days, array $times, array $br
             <?php endforeach; ?>
         <?php endforeach; ?>
     <?php endif; ?>
+
+<?php elseif ($view_mode === 'all_rooms'): ?>
+    <?php
+    require_once __DIR__ . '/room_matrix.php';
+    $print_doc_title = 'All Rooms Timetable';
+    ?>
+    <h2 class="year-title">All Rooms &mdash; Room Allocation</h2>
+    <?php tt_render_room_matrix(tt_room_matrix_official($schedules, $external_blocks, $days)); ?>
 
 <?php elseif ($view_mode === 'all_faculty'): ?>
     <?php $times = tt_time_slots($schedules); ?>
@@ -277,6 +316,7 @@ function official_person_table(array $grid, array $days, array $times, array $br
                 $grid[$time][$session['day']][] = $session;
             }
         }
+        official_add_blocks($grid, $external_blocks[$selected_key] ?? [], $times);
         $print_doc_title = 'Room ' . $selected_key . ' Timetable';
         ?>
         <h2 style="margin:0 0 12px;color:#6B1B5E;"><?php echo htmlspecialchars($selected_key); ?></h2>

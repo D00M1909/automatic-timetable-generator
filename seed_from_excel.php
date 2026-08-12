@@ -112,15 +112,24 @@ try {
         );
     }
 
-    // ---- Minor-slot days per year (confirmed by the timetable head): SY -> Mon/Tue/Wed,
-    // TY and BE -> Wed/Thu/Fri. generate.php reserves the last class slot of the day for
-    // minor subjects on these days. ----
+    // ---- Working days per year, and which slot on each is reserved for minors
+    // (confirmed by the timetable head, revised at the 2026-08-12 meeting):
+    // SY -> Mon/Tue/Wed with the minor in the last class slot (16:30-17:30);
+    // TY -> Wed/Thu/Fri, minor in the FIRST class slot (09:30-10:30) and only on
+    // Thu/Fri — Wednesday is a teaching day with no reservation;
+    // BE -> Wed/Thu/Fri, last class slot, unchanged.
+    // A null slot means "meets this day, reserve nothing"; generate.php reads both. ----
     $day_ids = array_column(db_get_rows($conn, "SELECT day_id, day_name FROM working_days"), 'day_id', 'day_name');
-    // Year 1 (FY) intentionally has no minor-day mapping — no minor-subject data exists for FY.
-    $minor_days_by_year = [2 => ['Monday', 'Tuesday', 'Wednesday'], 3 => ['Wednesday', 'Thursday', 'Friday'], 4 => ['Wednesday', 'Thursday', 'Friday']];
-    foreach ($minor_days_by_year as $year_of_study => $day_names) {
-        foreach ($day_names as $day_name) {
-            db_insert($conn, "INSERT INTO year_working_days (year_of_study, day_id) VALUES (?, ?)", "ii", [$year_of_study, $day_ids[$day_name]]);
+    $last_slot = (int) (db_get_row($conn, "SELECT MAX(slot_number) n FROM time_slots WHERE slot_type='class' AND year_of_study IS NULL")['n'] ?? 9);
+    // Year 1 (FY) intentionally has no mapping — no minor-subject data exists for FY.
+    $minor_days_by_year = [
+        2 => ['Monday' => $last_slot, 'Tuesday' => $last_slot, 'Wednesday' => $last_slot],
+        3 => ['Wednesday' => null, 'Thursday' => 1, 'Friday' => 1],
+        4 => ['Wednesday' => $last_slot, 'Thursday' => $last_slot, 'Friday' => $last_slot],
+    ];
+    foreach ($minor_days_by_year as $year_of_study => $slot_by_day) {
+        foreach ($slot_by_day as $day_name => $slot_number) {
+            db_insert($conn, "INSERT INTO year_working_days (year_of_study, day_id, slot_number) VALUES (?, ?, ?)", "iii", [$year_of_study, $day_ids[$day_name], $slot_number]);
         }
     }
 

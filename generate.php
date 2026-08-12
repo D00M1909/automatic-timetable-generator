@@ -1,5 +1,6 @@
 <?php
 require_once 'includes/config.php';
+require_once 'includes/timetable_data.php'; // is_minor_slot()
 
 $message = '';
 $message_type = '';
@@ -66,16 +67,18 @@ $time_slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORD
 	// (e.g. Second Year Mon/Tue/Wed, Third/Fourth Year Wed/Thu/Fri); the last slot on
 	// those days is additionally reserved for minor subjects.
 	$year_minor_days = [];
+	// Which slot on each of those days is reserved for minors. The minor is not always
+	// the last slot of the day: SY holds it at 16:30-17:30 (the last slot) but TY holds
+	// it at 09:30-10:30 (the first). A day present in $year_minor_days but absent here
+	// is a teaching day with no reservation at all — TY's Wednesday.
+	$year_minor_slot = [];
 	foreach ($year_working_days as $ywd) {
 	    $year_minor_days[$ywd['year_of_study']][] = $ywd['day_id'];
+	    if ($ywd['slot_number'] !== null) {
+	        $year_minor_slot[$ywd['year_of_study']][$ywd['day_id']] = (int) $ywd['slot_number'];
+	    }
 	}
-	// Find the last class slot number (for minor subject last-slot constraint) — across
-	// all years' class-type slots, matching the pre-scoping behavior since only SY/TY/BE
-	// use the minor mechanism and they all share the one global (year_of_study=NULL) grid.
-	$last_slot_number = 0;
-	foreach ($time_slots as $s) {
-	    if ($s['slot_type'] === 'class' && $s['slot_number'] > $last_slot_number) $last_slot_number = $s['slot_number'];
-	}
+
 
 $max_class_slots = max(array_map(fn($yos) => count(class_slots_for($time_slots, $yos)), array_unique(array_column($classes, 'year_of_study'))) ?: [0]);
 $can_generate = count($classes) > 0 && count($assignments) > 0 && count($days) > 0 && $max_class_slots > 0 && count($rooms) > 0;
@@ -219,9 +222,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                    if ($p === 'preferred') $any_preferred = true;
 	                                }
 	                                if ($avoid) continue;
-	                                $touches_last_slot = false;
-	                                foreach ($block as $s) { if ($s['slot_number'] == $last_slot_number) { $touches_last_slot = true; break; } }
-	                                if ($touches_last_slot && in_array($day_id, $minor_days ?? []) && !$assignment['is_minor']) continue;
+	                                $touches_minor_slot = false;
+	                                foreach ($block as $s) {
+	                                    if (is_minor_slot($year_minor_slot, $assignment['year_of_study'], $day_id, $s['slot_number'])) { $touches_minor_slot = true; break; }
+	                                }
+	                                if ($touches_minor_slot && !$assignment['is_minor']) continue;
 	                                foreach ($rooms as $room) {
 	                                    if ($room['room_type'] !== 'lab') continue;
 	                                    $is_online = in_array($room['room_id'], $online_room_ids, true);
@@ -282,8 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                }
 	                                $pref = $faculty_pref_lookup[$faculty_id][$day_id][$slot_id] ?? 'neutral';
 	                                if ($pref === 'avoid') continue;
-	                                $is_last_slot = ($slot['slot_number'] == $last_slot_number);
-	                                if ($is_last_slot && in_array($day_id, $minor_days ?? [])) {
+	                                if (is_minor_slot($year_minor_slot, $assignment['year_of_study'], $day_id, $slot['slot_number'])) {
 	                                    if (!$assignment['is_minor']) continue;
 	                                    $score = 200;
 	                                } else { $score = 0; }
@@ -440,12 +444,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate'])) {
 	                                            return true;
 	                                        }));
 	                                    }
+	                                    // The main placement loop refuses to put a non-minor subject in a
+	                                    // reserved slot; this retry has to honour the same rule or it quietly
+	                                    // reintroduces exactly what the reservation exists to prevent.
+	                                    $removed_is_minor = false;
+	                                    foreach ($assignments as $ra) {
+	                                        if ($ra['assignment_id'] == $removed['assignment_id']) { $removed_is_minor = (bool) $ra['is_minor']; break; }
+	                                    }
 	                                    foreach ($retry_days as $day) {
 	                                        foreach ($retry_slots as $slot) {
 	                                            $sid = $slot['slot_id'];
+	                                            if (!$removed_is_minor && is_minor_slot($year_minor_slot, $removed_year, $day['day_id'], $slot['slot_number'])) continue;
 	                                            if (isset($class_daily_schedule[$removed['class_id']][$day['day_id']][$sid]) ||
 	                                                isset($faculty_daily_schedule[$fac_id][$day['day_id']][$sid])) continue;
 	                                            foreach ($rooms as $room) {
+	                                                // The main loop refuses a room smaller than the class; this retry used
+	                                                // to take the first free room of any size, which is how a 60-strength
+	                                                // lecture ended up in a 30-seat lab.
+	                                                if (!in_array($room['room_id'], $online_room_ids, true) && $room['capacity'] < ($removed_class_row['strength'] ?? 0)) continue;
 	                                                if (!in_array($room['room_id'], $online_room_ids, true) && isset($room_daily_schedule[$room['room_id']][$day['day_id']][$sid])) continue;
 	                                                // Place it back
 	                                                $placed_sessions[] = [

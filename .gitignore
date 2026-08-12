@@ -1,6 +1,10 @@
 # Full database dump (contains real data) — use schema-only file instead
 timetable_db.sql
 
+# Composer: composer.json/lock are tracked, the installed tree and the phar are not
+/vendor/
+composer.phar
+
 # OS files
 .DS_Store
 Thumbs.db

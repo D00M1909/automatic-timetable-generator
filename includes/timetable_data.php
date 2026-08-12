@@ -256,8 +256,41 @@ function tt_normalize_room(string $room): string {
     return preg_match('/^104\s*(?:&|and|-)\s*105$/i', $room) ? '104-105' : $room;
 }
 
-/** Distinct rooms across every imported class, sorted. */
-function tt_room_list(array $schedules): array {
+/**
+ * External room bookings (room_unavailable): other departments' classes that consume
+ * one of our rooms without being scheduled by us. Lives in the DB, but the official
+ * views are built from the Excel JSON, which knows nothing about it — so both sources
+ * read it from here.
+ *
+ * Times come back as tt_time_key() values ("1315") rather than sheet labels: the DB
+ * stores 13:15:00 while the sheet writes "1.15 to 2.15", and matching on the key
+ * avoids having to reproduce the sheet's inconsistent 12-hour formatting.
+ *
+ * Returns [room_name][time_key][day_name] => reason.
+ */
+function tt_external_blocks(mysqli $conn): array {
+    static $cache = null;
+    if ($cache !== null) { return $cache; }
+    $sql = "SELECT r.room_name, d.day_name, ts.start_time, ru.reason
+            FROM room_unavailable ru
+            JOIN rooms r ON r.room_id = ru.room_id
+            JOIN working_days d ON d.day_id = ru.day_id
+            JOIN time_slots ts ON ts.slot_id = ru.slot_id";
+    $out = [];
+    if ($res = $conn->query($sql)) {
+        while ($row = $res->fetch_assoc()) {
+            $key = substr(str_replace(':', '', (string) $row['start_time']), 0, 4);
+            $out[tt_normalize_room((string) $row['room_name'])][$key][$row['day_name']] = (string) ($row['reason'] ?? '');
+        }
+    }
+    return $cache = $out;
+}
+
+/**
+ * Distinct rooms across every imported class, sorted. $extra names rooms that exist
+ * only in the DB (Animation Lab) so they still appear in the official room picker.
+ */
+function tt_room_list(array $schedules, array $extra = []): array {
     $rooms = [];
     foreach ($schedules as $s) {
         foreach ($s['sessions'] as $session) {
@@ -265,9 +298,27 @@ function tt_room_list(array $schedules): array {
             if ($room !== '' && empty($session['is_break'])) { $rooms[tt_normalize_room($room)] = true; }
         }
     }
+    foreach ($extra as $room) {
+        $room = tt_normalize_room((string) $room);
+        if ($room !== '') { $rooms[$room] = true; }
+    }
     $rooms = array_keys($rooms);
     natcasesort($rooms);
     return array_values($rooms);
+}
+
+/**
+ * Is (day, slot) the slot reserved for minor subjects for this year of study?
+ *
+ * $year_minor_slot is [year_of_study][day_id] => slot_number, built from
+ * year_working_days. The minor is not always the last slot of the day: SY holds it at
+ * 16:30-17:30 (last) while TY holds it at 09:30-10:30 (first), and a teaching day may
+ * carry no reservation at all (TY's Wednesday), which is why the day is a key rather
+ * than the whole year sharing one slot number.
+ */
+function is_minor_slot(array $year_minor_slot, $year_of_study, $day_id, $slot_number): bool {
+    return isset($year_minor_slot[$year_of_study][$day_id])
+        && $year_minor_slot[$year_of_study][$day_id] === (int) $slot_number;
 }
 
 /** Ordered list of distinct time slots across the given schedules. */

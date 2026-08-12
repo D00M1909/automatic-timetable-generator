@@ -19,6 +19,7 @@ $modes = [
     'faculty' => 'By Faculty',
     'all_faculty' => 'All Faculty',
     'room' => 'By Room',
+    'all_rooms' => 'All Rooms',
 ];
 
 $extra_modes = ['year_classes' => 'Year - All Class Timetables', 'year_faculty' => 'Year - All Faculty Timetables', 'year_rooms' => 'Year - All Room Timetables'];
@@ -48,6 +49,14 @@ function mode_link(string $source, string $mode): string {
         .timetable-grid .class-slot { background: #e8f5e9; }
         .timetable-grid .class-slot.lab { background: #e3f2fd; border: 2px solid #2196f3; }
         .timetable-grid .empty-slot { color: #ccc; }
+        /* External booking: another department holds the room, we cannot schedule it. */
+        .blocked-slot { background: #eceff1; border: 2px dashed #90a4ae !important; }
+        .blocked-slot .subject-name { color: #455a64; }
+        /* Slot the department reserves for minor subjects — spoken for, not free. */
+        .minor-slot { background: #fff3e0; border: 2px dashed #ffb74d !important; }
+        .minor-slot .subject-name { color: #e65100; letter-spacing: .5px; }
+        .minor-slot .blocked-badge { color: #e65100; background: #ffe0b2; }
+        .blocked-badge { font-size: 9px; color: #546e7a; background: #cfd8dc; padding: 1px 4px; border-radius: 2px; display: inline-block; margin-top: 2px; letter-spacing: .3px; }
 
         .break-cell { background: #fff8e1 !important; color: #856404 !important; font-style: italic; }
         .lunch-cell { background: #ffecb3 !important; color: #856404 !important; font-weight: 600; }
@@ -109,6 +118,24 @@ function mode_link(string $source, string $mode): string {
         .master-grid .room-name { color: #9c27b0; font-size: 8px; font-weight: 600; }
         .master-grid .lab-badge { font-size: 8px; color: #2196f3; font-weight: 600; }
         .master-grid .energy-badge { font-size: 8px; color: #27ae60; background: #d4edda; padding: 1px 3px; border-radius: 2px; display: inline-block; margin-top: 1px; }
+
+        /* All Rooms matrix: rooms down the left, day > period across. Modelled on the
+           department's own master sheet (FY/8 MARCH Master TT_FINAL ... FE blank.xls),
+           which is a room-allocation grid rather than one table per room. */
+        .room-matrix { border-collapse: collapse; font-size: 10px; border: 1px solid #ccc; }
+        .room-matrix th, .room-matrix td { border: 1px solid #d5d5d5; padding: 3px 4px; text-align: center; }
+        .room-matrix thead th { background: #6B1B5E; color: #fff; font-weight: 600; }
+        .room-matrix thead th.day-header { background: #7B2D6E; border-left: 2px solid #fff; }
+        .room-matrix thead th.period-header { background: #00BFA5; font-size: 9px; font-weight: 600; min-width: 68px; }
+        .room-matrix .room-cell { background: #f8f9fa; text-align: left; font-weight: 600; color: #333; white-space: nowrap; position: sticky; left: 0; z-index: 2; }
+        .room-matrix .meta-cell { background: #f8f9fa; color: #666; font-size: 9px; }
+        .room-matrix td.day-start { border-left: 2px solid #bbb; }
+        .room-matrix .m-free { color: #ccc; }
+        .room-matrix .m-busy { background: #e8f5e9; }
+        .room-matrix .m-busy.lab { background: #e3f2fd; }
+        .room-matrix .m-blocked { background: #eceff1; color: #455a64; font-style: italic; }
+        .room-matrix .m-class { font-weight: 600; color: #2c3e50; display: block; }
+        .room-matrix .m-sub { color: #777; font-size: 9px; display: block; }
 
         .master-day-section { margin-bottom: 25px; }
         .master-day-title { font-size: 16px; font-weight: 700; color: #6B1B5E; margin-bottom: 8px; padding: 8px 12px; background: linear-gradient(135deg, #f3e5f5, #e8d5f0); border-radius: 4px; border-left: 4px solid #6B1B5E; }
@@ -178,7 +205,10 @@ function mode_link(string $source, string $mode): string {
         <div class="content-box">
             <div class="content-box-header">
                 <span>View Timetable</span>
-                <button class="btn btn-print" onclick="printPage()"><svg><use href="#icon-print"/></svg> Print</button>
+                <span style="display:inline-flex;gap:8px;align-items:center;">
+                    <a class="btn" href="export_excel.php?<?php echo htmlspecialchars(http_build_query(['source' => $source, 'mode' => $view_mode, 'key' => $selected_key, 'id' => $selected_id])); ?>">Download Excel</a>
+                    <button class="btn btn-print" onclick="printPage()"><svg><use href="#icon-print"/></svg> Print</button>
+                </span>
             </div>
             <div class="content-box-body">
                 <?php

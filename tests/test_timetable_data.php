@@ -71,6 +71,27 @@ $faculty_list = tt_faculty_list($schedules);
 assert(!in_array('Dr Poonamkumar Hanwate', $faculty_list, true), 'stale spelling should not survive: ' . implode(', ', $faculty_list));
 assert(count($faculty_list) === count(array_unique($faculty_list)), 'faculty list has duplicates');
 
+// Minor reservation is per (year, day, slot) — not "the last slot on every minor day".
+// Day ids follow working_days: Mon=1 .. Fri=5. This mirrors the rows the
+// 2026-08-12b migration writes.
+$minor_slot = [
+    2 => [1 => 9, 2 => 9, 3 => 9],   // SY: Mon/Tue/Wed, last slot
+    3 => [4 => 1, 5 => 1],           // TY: Thu/Fri, FIRST slot; Wednesday absent
+    4 => [3 => 9, 4 => 9, 5 => 9],   // BE: Wed/Thu/Fri, last slot
+];
+assert(is_minor_slot($minor_slot, 2, 1, 9) === true, 'SY Monday last slot is reserved');
+assert(is_minor_slot($minor_slot, 2, 1, 1) === false, 'SY Monday first slot is free');
+assert(is_minor_slot($minor_slot, 3, 4, 1) === true, 'TY Thursday first slot is reserved');
+assert(is_minor_slot($minor_slot, 3, 4, 9) === false, 'TY Thursday last slot is no longer reserved');
+// TY teaches Wednesday but holds no minor there — the whole reason slot_number is
+// nullable rather than the row being deleted.
+assert(is_minor_slot($minor_slot, 3, 3, 1) === false, 'TY Wednesday first slot is schedulable');
+assert(is_minor_slot($minor_slot, 3, 3, 9) === false, 'TY Wednesday last slot is schedulable');
+// A year with no mapping at all (FY) reserves nothing.
+assert(is_minor_slot($minor_slot, 1, 1, 9) === false, 'FY reserves nothing');
+// String slot numbers arrive straight from the DB; they must compare equal.
+assert(is_minor_slot($minor_slot, 3, 4, '1') === true, 'string slot number from DB');
+
 // 12-hour sheet times must sort chronologically, not lexically.
 $times = tt_time_slots($schedules);
 assert($times[0] === '09.30 to 10.30', 'first slot: ' . $times[0]);

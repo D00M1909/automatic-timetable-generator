@@ -11,6 +11,57 @@ $slots = db_get_rows($conn, "SELECT * FROM time_slots WHERE is_active=1 ORDER BY
 $day_list = $days;
 $slot_list = $slots;
 
+// [year_of_study][day_id] => reserved slot_number. Painted as MINOR wherever the
+// reservation left a cell empty, so the slot reads as spoken for rather than free
+// even when no minor subject has been entered for that class.
+$year_minor_slot = [];
+foreach (db_get_rows($conn, "SELECT year_of_study, day_id, slot_number FROM year_working_days") as $ywd) {
+    if ($ywd['slot_number'] !== null) {
+        $year_minor_slot[$ywd['year_of_study']][$ywd['day_id']] = (int) $ywd['slot_number'];
+    }
+}
+
+// External bookings by room_id: [room_id][day_id][slot_id] => reason.
+$room_blocks = [];
+foreach (db_get_rows($conn, "SELECT room_id, day_id, slot_id, reason FROM room_unavailable") as $ru) {
+    $room_blocks[$ru['room_id']][$ru['day_id']][$ru['slot_id']] = (string) ($ru['reason'] ?? '');
+}
+
+/** Overlay for one room: [day_id][slot_id] => label/css, consumed by generated_person_table(). */
+function generated_room_overlay(array $room_blocks, $room_id): array {
+    $out = [];
+    foreach ($room_blocks[$room_id] ?? [] as $day_id => $slots) {
+        foreach ($slots as $slot_id => $reason) {
+            $out[$day_id][$slot_id] = ['label' => $reason, 'css' => 'blocked-slot', 'badge' => 'BLOCKED'];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Overlay for one class: the minor reservation, same shape as the room overlay.
+ *
+ * slot_number is only unique within a grid — FY has its own time_slots rows numbered
+ * 1..9 alongside the shared SY/TY/BE rows also numbered 1..9. Matching on slot_number
+ * across the whole list would paint TY's slot-1 reservation onto FY's 08:30 row too,
+ * so the class's own grid is selected first (same rule as generate.php's
+ * class_slots_for(): year-specific rows if the year has any, else the shared rows).
+ */
+function generated_minor_overlay(array $year_minor_slot, $year_of_study, array $day_list, array $slot_list): array {
+    $year_specific = array_filter($slot_list, static fn($s) => $s['year_of_study'] !== null && (int) $s['year_of_study'] === (int) $year_of_study);
+    $grid = $year_specific ?: array_filter($slot_list, static fn($s) => $s['year_of_study'] === null);
+    $out = [];
+    foreach ($day_list as $day) {
+        foreach ($grid as $slot) {
+            if ($slot['slot_type'] !== 'class') { continue; }
+            if (is_minor_slot($year_minor_slot, $year_of_study, $day['day_id'], $slot['slot_number'])) {
+                $out[$day['day_id']][$slot['slot_id']] = ['label' => 'MINOR', 'css' => 'minor-slot', 'badge' => 'RESERVED'];
+            }
+        }
+    }
+    return $out;
+}
+
 $timetable_data = [];
 $selected_name = '';
 
@@ -81,7 +132,16 @@ function generated_time_cell($slot, $sep = '-') {
 }
 
 /** One printable day section of the master grid, limited to $classes. */
-function generated_master_day($day, $classes, $master_timetable, $slot_list) {
+function generated_master_day($day, $classes, $master_timetable, $slot_list, array $year_minor_slot = []) {
+    // slot_number repeats across grids (see generated_minor_overlay), so a reservation
+    // may only be painted on a slot belonging to that class's own grid. Built once per
+    // year here rather than per cell.
+    $grid_slot_ids = [];
+    foreach (array_unique(array_column($classes, 'year_of_study')) as $yos) {
+        $specific = array_filter($slot_list, static fn($s) => $s['year_of_study'] !== null && (int) $s['year_of_study'] === (int) $yos);
+        $grid = $specific ?: array_filter($slot_list, static fn($s) => $s['year_of_study'] === null);
+        $grid_slot_ids[$yos] = array_flip(array_column($grid, 'slot_id'));
+    }
     ?>
     <div class="master-day-section">
         <div class="master-day-title"><?php echo htmlspecialchars($day['day_name']); ?></div>
@@ -97,9 +157,16 @@ function generated_master_day($day, $classes, $master_timetable, $slot_list) {
                     <tr>
                         <?php generated_time_cell($slot); ?>
                         <?php foreach ($classes as $class): ?>
-                            <?php $cell_data = $master_timetable[$day['day_id']][$slot['slot_id']][$class['class_id']] ?? null; ?>
-                            <td class="<?php echo generated_cell_class($slot, $cell_data); ?>">
-                                <?php if ($slot['slot_type'] === 'break' || $slot['slot_type'] === 'lunch' || !$cell_data): ?>
+                            <?php
+                            $cell_data = $master_timetable[$day['day_id']][$slot['slot_id']][$class['class_id']] ?? null;
+                            $reserved = !$cell_data && $slot['slot_type'] === 'class'
+                                && isset($grid_slot_ids[$class['year_of_study']][$slot['slot_id']])
+                                && is_minor_slot($year_minor_slot, $class['year_of_study'], $day['day_id'], $slot['slot_number']);
+                            ?>
+                            <td class="<?php echo $reserved ? 'minor-slot' : generated_cell_class($slot, $cell_data); ?>">
+                                <?php if ($reserved): ?>
+                                    <div class="subject-name">MINOR</div>
+                                <?php elseif ($slot['slot_type'] === 'break' || $slot['slot_type'] === 'lunch' || !$cell_data): ?>
                                     --
                                 <?php else: ?>
                                     <div class="subject-name"><?php echo htmlspecialchars($cell_data['subject_name'] ?? ''); ?></div>
@@ -145,8 +212,14 @@ function generated_entity_schedule($conn, $type, $id) {
     return $data;
 }
 
-/** The time x day table used by the class, faculty and room views. */
-function generated_person_table($timetable_data, $day_list, $slot_list, $view_mode) {
+/**
+ * The time x day table used by the class, faculty and room views.
+ *
+ * $overlay is [day_id][slot_id] => ['label','css','badge'] and only paints cells the
+ * scheduler left empty — a real booking always wins, so a clash stays visible instead
+ * of being hidden behind a MINOR or BLOCKED label.
+ */
+function generated_person_table($timetable_data, $day_list, $slot_list, $view_mode, array $overlay = []) {
     ?>
     <div class="timetable-container">
         <table class="timetable-grid">
@@ -158,9 +231,15 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                 <tr>
                     <?php generated_time_cell($slot, 'TO'); ?>
                     <?php foreach ($day_list as $day): ?>
-                        <?php $cell_data = $timetable_data[$day['day_id']][$slot['slot_id']] ?? null; ?>
-                        <td class="<?php echo generated_cell_class($slot, $cell_data); ?>">
-                            <?php if ($slot['slot_type'] === 'break' || $slot['slot_type'] === 'lunch' || !$cell_data): ?>
+                        <?php
+                        $cell_data = $timetable_data[$day['day_id']][$slot['slot_id']] ?? null;
+                        $mark = (!$cell_data && $slot['slot_type'] === 'class') ? ($overlay[$day['day_id']][$slot['slot_id']] ?? null) : null;
+                        ?>
+                        <td class="<?php echo $mark ? $mark['css'] : generated_cell_class($slot, $cell_data); ?>">
+                            <?php if ($mark): ?>
+                                <div class="subject-name"><?php echo htmlspecialchars($mark['label']); ?></div>
+                                <div class="blocked-badge"><?php echo htmlspecialchars($mark['badge']); ?></div>
+                            <?php elseif ($slot['slot_type'] === 'break' || $slot['slot_type'] === 'lunch' || !$cell_data): ?>
                                 --
                             <?php else: ?>
                                 <div class="subject-name"><?php echo htmlspecialchars($cell_data['subject_name'] ?? ''); ?></div>
@@ -186,7 +265,7 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
 }
 ?>
 
-                <?php if (!in_array($view_mode, ['master', 'year', 'all_faculty'], true)): ?>
+                <?php if (!in_array($view_mode, ['master', 'year', 'all_faculty', 'all_rooms'], true)): ?>
                 <form method="GET" class="filter-bar">
                     <input type="hidden" name="source" value="generated">
                     <input type="hidden" name="mode" value="<?php echo htmlspecialchars($view_mode); ?>">
@@ -210,11 +289,20 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                 </form>
                 <?php endif; ?>
 
-                <?php if ($view_mode === 'master'): ?>
+                <?php if ($view_mode === 'all_rooms'): ?>
+
+                    <?php
+                    require_once __DIR__ . '/room_matrix.php';
+                    $print_doc_title = 'All Rooms Timetable';
+                    ?>
+                    <h2 class="year-title">All Rooms &mdash; Room Allocation</h2>
+                    <?php tt_render_room_matrix(tt_room_matrix_generated($conn, $day_list, $slot_list, $rooms)); ?>
+
+                <?php elseif ($view_mode === 'master'): ?>
 
                     <?php if (!empty($master_timetable) && count($classes) > 0): ?>
                         <?php foreach ($day_list as $day): ?>
-                            <?php generated_master_day($day, $classes, $master_timetable, $slot_list); ?>
+                            <?php generated_master_day($day, $classes, $master_timetable, $slot_list, $year_minor_slot); ?>
                         <?php endforeach; ?>
                     <?php else: ?>
                         <div class="master-empty">
@@ -254,7 +342,7 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                             <?php $year_classes = array_values(array_filter($classes, static fn($c) => tt_year_code($c['class_name']) === $code)); ?>
                             <h2 class="year-title"><?php echo htmlspecialchars(tt_year_label($code)); ?><span class="year-sub"><?php echo count($year_classes); ?> classes</span></h2>
                             <?php foreach ($day_list as $day): ?>
-                                <?php generated_master_day($day, $year_classes, $master_timetable, $slot_list); ?>
+                                <?php generated_master_day($day, $year_classes, $master_timetable, $slot_list, $year_minor_slot); ?>
                             <?php endforeach; ?>
                         <?php endforeach; ?>
                         <?php if (count($shown_years) === 1): ?>
@@ -280,14 +368,14 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
                             <?php $entity_rows = generated_entity_schedule($conn, 'class', $class['class_id']); ?>
                             <div class="master-day-section">
                                 <div class="master-day-title"><?php echo htmlspecialchars($class['class_name']); ?></div>
-                                <?php generated_person_table($entity_rows, $day_list, $slot_list, 'class'); ?>
+                                <?php generated_person_table($entity_rows, $day_list, $slot_list, 'class', generated_minor_overlay($year_minor_slot, $class['year_of_study'], $day_list, $slot_list)); ?>
                             </div>
                         <?php endforeach; ?>
                     <?php elseif ($view_mode === 'year_rooms'): ?>
                         <?php foreach ($year_room_ids as $room_id => $room_label): ?>
                             <div class="master-day-section">
                                 <div class="master-day-title"><?php echo htmlspecialchars($room_label); ?></div>
-                                <?php generated_person_table(generated_entity_schedule($conn, 'room', $room_id), $day_list, $slot_list, 'room'); ?>
+                                <?php generated_person_table(generated_entity_schedule($conn, 'room', $room_id), $day_list, $slot_list, 'room', generated_room_overlay($room_blocks, $room_id)); ?>
                             </div>
                         <?php endforeach; ?>
                     <?php else: ?>
@@ -320,8 +408,26 @@ function generated_person_table($timetable_data, $day_list, $slot_list, $view_mo
 
                 <?php else: ?>
 
-                    <?php if ($selected_id > 0 && !empty($timetable_data)): ?>
-                        <?php generated_person_table($timetable_data, $day_list, $slot_list, $view_mode); ?>
+                    <?php
+                    // A room can be fully booked by other departments and hold nothing of
+                    // ours — Animation Lab is exactly that — so an empty $timetable_data is
+                    // not the same as "nothing to show".
+                    $has_overlay_only = $view_mode === 'room' && !empty($room_blocks[$selected_id]);
+                    ?>
+                    <?php if ($selected_id > 0 && (!empty($timetable_data) || $has_overlay_only)): ?>
+                        <?php
+                        // A class shows its minor reservation; a room shows the external
+                        // bookings that consume it. Faculty views get neither.
+                        if ($view_mode === 'class') {
+                            $sel_class = array_values(array_filter($classes, static fn($c) => $c['class_id'] == $selected_id));
+                            $single_overlay = $sel_class ? generated_minor_overlay($year_minor_slot, $sel_class[0]['year_of_study'], $day_list, $slot_list) : [];
+                        } elseif ($view_mode === 'room') {
+                            $single_overlay = generated_room_overlay($room_blocks, $selected_id);
+                        } else {
+                            $single_overlay = [];
+                        }
+                        ?>
+                        <?php generated_person_table($timetable_data, $day_list, $slot_list, $view_mode, $single_overlay); ?>
 
                         <?php if ($view_mode === 'class'): ?>
                             <?php
